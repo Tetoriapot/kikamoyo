@@ -1,0 +1,483 @@
+'use client';
+
+import { useEffect, useId, useMemo, useState } from 'react';
+import {
+  ArrowDown, ArrowUp, Check, Copy, CopyPlus, Eye, EyeOff, FlipHorizontal2,
+  FlipVertical2, Frame, Grid2X2, Heart, Layers3, Maximize, Moon, Palette, Plus,
+  Redo2, RotateCw, Save, Search, Share2, Shuffle, SlidersHorizontal, Sparkles,
+  Sun, Trash2, Undo2, WandSparkles, ZoomIn, ZoomOut,
+} from 'lucide-react';
+
+import { ExportDialog } from '@/components/export-dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CATEGORY_OPTIONS, INITIAL_PRESET, PALETTE_OPTIONS, PRESETS, presetDocument } from '@/data/presets';
+import { usePatternEditor } from '@/hooks/use-pattern-editor';
+import { encodeShareState } from '@/lib/export-pattern';
+import { PatternCanvas } from '@/lib/pattern-engine';
+import { hashUnit } from '@/lib/seed';
+import {
+  BLEND_MODES, CANVAS_SIZES, PATTERN_LABELS, PATTERN_TYPES, PLACEMENT_LABELS, PLACEMENT_TYPES,
+  cloneDocument, type EditorDocument, type PatternPreset,
+} from '@/lib/pattern-types';
+
+const AUTO_COLOR_MODES = [
+  ['random', 'ランダム'], ['complement', '補色'], ['analogous', '類似色'], ['triad', '三色配色'],
+  ['tetrad', '四色配色'], ['mono', 'モノクローム'], ['lightness', '明度違い'], ['saturation', '彩度違い'],
+] as const;
+
+const PALETTE_LABELS: Record<string, string> = {
+  monochrome: 'モノクロ', grayscale: 'グレースケール', pastel: 'パステル', vivid: 'ビビッド', retro: 'レトロ',
+  nordic: '北欧', japanese: '和風', night: '夜空', ocean: '海', forest: '森', autumn: '秋', sakura: '桜',
+  gold: 'ゴールド', neon: 'ネオン', cyber: 'サイバー', artdeco: 'アールデコ', oldbook: '古書', cream: 'クリーム',
+  darkfantasy: 'ダークファンタジー', magic: '魔法',
+};
+
+const RANDOM_CATEGORIES = [
+  ['all', '完全ランダム'], ['basic', 'シンプル'], ['cute', 'かわいい'], ['cool', 'クール'],
+  ['japanese', '和風'], ['retro', 'レトロ'], ['scifi', 'SF'], ['magic', '魔法'],
+  ['artdeco', '高級'], ['pop', 'ポップ'], ['dark', 'ダーク'], ['trpg', 'TRPG'], ['background', '背景向け'],
+] as const;
+
+interface UserPreset {
+  id: string;
+  name: string;
+  document: EditorDocument;
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number) {
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const chroma = (1 - Math.abs(2 * l - 1)) * s;
+  const x = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = l - chroma / 2;
+  const [r, g, b] = hue < 60 ? [chroma, x, 0] : hue < 120 ? [x, chroma, 0] : hue < 180 ? [0, chroma, x] : hue < 240 ? [0, x, chroma] : hue < 300 ? [x, 0, chroma] : [chroma, 0, x];
+  return `#${[r, g, b].map((value) => Math.round((value + m) * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function freshSeed() {
+  const values = new Uint32Array(1);
+  window.crypto.getRandomValues(values);
+  return 100000 + (values[0] % 900000);
+}
+
+function seededUnit(seed: number, key: number, channel = 0) {
+  return hashUnit(seed, 'kikamoyo-generator', key, channel);
+}
+
+function colorScheme(mode: (typeof AUTO_COLOR_MODES)[number][0], seed: number) {
+  const base = Math.floor(seededUnit(seed, 0) * 360);
+  if (mode === 'random') return Array.from({ length: 5 }, (_, index) => hslToHex(seededUnit(seed, index, 1) * 360, 62 + seededUnit(seed, index, 2) * 22, 48 + seededUnit(seed, index, 3) * 18));
+  if (mode === 'complement') return [0, 180, 25, 205, 335].map((offset, index) => hslToHex((base + offset + 360) % 360, 62, 44 + index * 5));
+  if (mode === 'analogous') return [-42, -20, 0, 20, 42].map((offset, index) => hslToHex((base + offset + 360) % 360, 60, 43 + index * 6));
+  if (mode === 'triad') return [0, 120, 240, 30, 210].map((offset, index) => hslToHex((base + offset) % 360, 66, 45 + index * 5));
+  if (mode === 'tetrad') return [0, 90, 180, 270, 45].map((offset, index) => hslToHex((base + offset) % 360, 61, 44 + index * 5));
+  if (mode === 'mono') return [24, 36, 49, 63, 78].map((lightness) => hslToHex(base, 12, lightness));
+  if (mode === 'lightness') return [25, 36, 48, 62, 76].map((lightness) => hslToHex(base, 64, lightness));
+  return [24, 40, 56, 72, 88].map((saturation, index) => hslToHex(base, saturation, 46 + index * 5));
+}
+
+function RangeControl({ label, value, min, max, step = 1, unit, onChange }: {
+  label: string; value: number; min: number; max: number; step?: number; unit: string; onChange: (value: number) => void;
+}) {
+  const controlId = useId();
+  const displayedValue = Number(value.toFixed(step < 1 ? 1 : 0));
+  function commitNumber(target: HTMLInputElement) {
+    const parsed = Number(target.value);
+    const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : displayedValue;
+    target.value = String(next);
+    onChange(next);
+  }
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <label id={`${controlId}-label`} htmlFor={`${controlId}-number`} className="text-[13px] font-medium text-foreground/80">{label}</label>
+        <div className="flex h-7 items-center rounded-md border border-border bg-background px-2 text-xs tabular-nums text-muted-foreground">
+          <input key={displayedValue} id={`${controlId}-number`} aria-label={`${label}の数値`} className="w-12 bg-transparent text-right text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring" type="number" min={min} max={max} step={step} defaultValue={displayedValue}
+            onBlur={(event) => commitNumber(event.currentTarget)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+          <span className="ml-1">{unit}</span>
+        </div>
+      </div>
+      <Slider aria-labelledby={`${controlId}-label`} min={min} max={max} step={step} value={[value]} onValueChange={(next) => onChange(Number(Array.isArray(next) ? (next[0] ?? value) : next))} />
+    </div>
+  );
+}
+
+function HexInput({ label, value, onCommit }: { label: string; value: string; onCommit: (value: string) => void }) {
+  function commit(target: HTMLInputElement) {
+    const next = target.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(next)) onCommit(next.toLowerCase());
+    else target.value = value;
+  }
+  return <Input key={value} aria-label={label} defaultValue={value} inputMode="text" maxLength={7}
+    onBlur={(event) => commit(event.currentTarget)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />;
+}
+
+function DeferredNumberInput({ label, value, min, max, onCommit }: { label: string; value: number; min: number; max: number; onCommit: (value: number) => void }) {
+  function commit(target: HTMLInputElement) {
+    const parsed = Number(target.value);
+    const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : value;
+    target.value = String(next);
+    onCommit(next);
+  }
+  return <Input key={value} aria-label={label} type="number" min={min} max={max} defaultValue={value}
+    onBlur={(event) => commit(event.currentTarget)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />;
+}
+
+function PresetCard({ preset, active, favorite, onLoad, onFavorite }: {
+  preset: PatternPreset; active: boolean; favorite: boolean; onLoad: () => void; onFavorite: () => void;
+}) {
+  return (
+    <div className={`group relative overflow-hidden rounded-xl border bg-background transition hover:-translate-y-0.5 hover:shadow-md ${active ? 'border-primary ring-2 ring-primary/15' : 'border-border'}`}>
+      <button type="button" onClick={onLoad} className="block w-full text-left" aria-label={`${preset.name}を読み込む`} aria-pressed={active}>
+        <span className="block aspect-[8/5] overflow-hidden bg-muted"><PatternCanvas document={preset.document} maxObjects={12} className="h-full w-full" label={`${preset.name}のサムネイル`} /></span>
+        <span className="block p-2"><strong className="block truncate text-[11px]">{preset.name}</strong><span className="text-[9px] text-muted-foreground">{preset.categoryLabel}</span></span>
+      </button>
+      <button type="button" onClick={onFavorite} className={`absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full border border-white/45 bg-black/35 text-white shadow-sm backdrop-blur-sm transition ${favorite ? 'text-[#ff7b75]' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100'}`} aria-label={favorite ? 'お気に入りから削除' : 'お気に入りに追加'} aria-pressed={favorite}>
+        <Heart className={`size-3.5 ${favorite ? 'fill-current' : ''}`} />
+      </button>
+    </div>
+  );
+}
+
+function PresetBrowser({ presets, activeId, favorites, category, search, favoriteOnly, recentIds, recentRandom, onCategory, onSearch, onFavoriteOnly, onLoad, onLoadRandom, onFavorite }: {
+  presets: PatternPreset[]; activeId: string; favorites: string[]; category: string; search: string; favoriteOnly: boolean; recentIds: string[]; recentRandom: EditorDocument[];
+  onCategory: (value: string) => void; onSearch: (value: string) => void; onFavoriteOnly: () => void; onLoad: (preset: PatternPreset) => void; onLoadRandom: (document: EditorDocument, index: number) => void; onFavorite: (id: string) => void;
+}) {
+  const [visibleCount, setVisibleCount] = useState(30);
+  const visiblePresets = presets.slice(0, visibleCount);
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="mb-3 flex items-center justify-between">
+        <div><h2 className="text-sm font-bold">プリセット</h2><p className="text-[10px] text-muted-foreground">{presets.length} / 100 patterns</p></div>
+        <Button size="icon-sm" variant={favoriteOnly ? 'secondary' : 'ghost'} aria-label="お気に入りだけ表示" aria-pressed={favoriteOnly} onClick={onFavoriteOnly}><Heart className={favoriteOnly ? 'fill-current' : ''} /></Button>
+      </div>
+      <div className="relative mb-3"><Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" /><Input aria-label="プリセットを検索" className="pl-8" placeholder="名前・タグで検索" value={search} onChange={(event) => onSearch(event.target.value)} /></div>
+      <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1 text-[10px]">
+        {CATEGORY_OPTIONS.map((item) => <button key={item.value} type="button" onClick={() => onCategory(item.value)} aria-pressed={category === item.value} className={`whitespace-nowrap rounded-full px-2.5 py-1.5 font-medium ${category === item.value ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>{item.label}</button>)}
+      </div>
+      {recentIds.length > 0 && !search && category === 'all' && !favoriteOnly && <p className="mb-2 text-[9px] font-bold uppercase tracking-[.12em] text-muted-foreground">最近使ったもの · {recentIds.length}</p>}
+      {recentRandom.length > 0 && !search && category === 'all' && !favoriteOnly && <div className="mb-3"><p className="mb-2 text-[9px] font-bold uppercase tracking-[.12em] text-muted-foreground">おまかせ履歴 · {recentRandom.length}</p><div className="grid grid-cols-5 gap-1.5">{recentRandom.slice(0, 10).map((document, index) => <button key={`${document.seed}-${index}`} type="button" className="aspect-square overflow-hidden rounded-md border border-border bg-muted transition hover:border-primary focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onLoadRandom(document, index)} aria-label={`おまかせ履歴${index + 1}を読み込む`}><PatternCanvas document={document} maxObjects={5} className="h-full w-full" label={`おまかせ履歴${index + 1}`} /></button>)}</div></div>}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {presets.length ? <><div className="grid grid-cols-2 gap-2.5 pb-3">{visiblePresets.map((preset) => <PresetCard key={preset.id} preset={preset} active={activeId === preset.id} favorite={favorites.includes(preset.id)} onLoad={() => onLoad(preset)} onFavorite={() => onFavorite(preset.id)} />)}</div>{visibleCount < presets.length && <Button variant="outline" className="mb-4 w-full" onClick={() => setVisibleCount((value) => value + 30)}>さらに表示（残り {presets.length - visibleCount}）</Button>}</>
+          : <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-border bg-muted/35 p-5 text-center text-xs text-muted-foreground">条件に合うプリセットがありません。<br />検索やカテゴリーを変更してください。</div>}
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  const editor = usePatternEditor();
+  const currentDocument = editor.document;
+  const [activeLayerId, setActiveLayerId] = useState(currentDocument.layers[0]?.id ?? '');
+  const [activePresetId, setActivePresetId] = useState(INITIAL_PRESET.id);
+  const [activePresetName, setActivePresetName] = useState(INITIAL_PRESET.name);
+  const [tab, setTab] = useState('pattern');
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('all');
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [userPresets, setUserPresets] = useState<UserPreset[]>([]);
+  const [recentRandom, setRecentRandom] = useState<EditorDocument[]>([]);
+  const [darkMode, setDarkMode] = useState(false);
+  const [tilePreview, setTilePreview] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [randomCategory, setRandomCategory] = useState('all');
+  const [notice, setNotice] = useState('');
+  const [settingsReady, setSettingsReady] = useState(false);
+
+  const activeLayer = currentDocument.layers.find((layer) => layer.id === activeLayerId) ?? currentDocument.layers[0];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        setFavorites(JSON.parse(window.localStorage.getItem('favorites') ?? '[]'));
+        setRecentIds(JSON.parse(window.localStorage.getItem('recentPresets') ?? '[]'));
+        setUserPresets(JSON.parse(window.localStorage.getItem('userPresets') ?? '[]'));
+        setRecentRandom(JSON.parse(window.localStorage.getItem('recentRandom') ?? '[]'));
+        const settings = JSON.parse(window.localStorage.getItem('settings') ?? '{}') as { darkMode?: boolean; tilePreview?: boolean };
+        setDarkMode(Boolean(settings.darkMode));
+        setTilePreview(Boolean(settings.tilePreview));
+      } catch { /* Start with safe defaults when storage is corrupt. */ }
+      finally { setSettingsReady(true); }
+    }, 0);
+    if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    window.localStorage.setItem('settings', JSON.stringify({ darkMode, tilePreview }));
+  }, [darkMode, settingsReady, tilePreview]);
+
+  const allPresets = useMemo<PatternPreset[]>(() => [
+    ...userPresets.map((preset) => ({ id: preset.id, name: preset.name, category: ['basic'] as PatternPreset['category'], categoryLabel: 'MY PRESET', tags: ['user', 'favorite'], document: preset.document })),
+    ...PRESETS,
+  ], [userPresets]);
+
+  const filteredPresets = useMemo(() => {
+    const normalized = search.trim().toLowerCase();
+    let result = allPresets.filter((preset) => (category === 'all' || preset.category.includes(category as never))
+      && (!favoriteOnly || favorites.includes(preset.id))
+      && (!normalized || `${preset.name} ${preset.tags.join(' ')}`.toLowerCase().includes(normalized)));
+    if (!normalized && category === 'all' && !favoriteOnly && recentIds.length) {
+      const recent = recentIds.map((id) => result.find((preset) => preset.id === id)).filter(Boolean) as PatternPreset[];
+      result = [...recent, ...result.filter((preset) => !recentIds.includes(preset.id))];
+    }
+    return result;
+  }, [allPresets, category, favoriteOnly, favorites, recentIds, search]);
+
+  function flash(message: string) {
+    setNotice(message);
+    window.setTimeout(() => setNotice(''), 1800);
+  }
+
+  function loadPreset(preset: PatternPreset) {
+    editor.replace(presetDocument(preset));
+    setActiveLayerId(preset.document.layers[0]?.id ?? '');
+    setActivePresetId(preset.id);
+    setActivePresetName(preset.name);
+    const recent = [preset.id, ...recentIds.filter((id) => id !== preset.id)].slice(0, 10);
+    setRecentIds(recent);
+    window.localStorage.setItem('recentPresets', JSON.stringify(recent));
+    flash(`${preset.name}を読み込みました`);
+  }
+
+  function toggleFavorite(id: string) {
+    const next = favorites.includes(id) ? favorites.filter((value) => value !== id) : [id, ...favorites];
+    setFavorites(next);
+    window.localStorage.setItem('favorites', JSON.stringify(next));
+  }
+
+  function saveUserPreset() {
+    const name = window.prompt('プリセット名を入力してください', `${activePresetName} カスタム`);
+    if (!name?.trim()) return;
+    const entry: UserPreset = { id: `user-${Date.now()}`, name: name.trim(), document: cloneDocument(currentDocument) };
+    const next = [entry, ...userPresets].slice(0, 40);
+    setUserPresets(next);
+    window.localStorage.setItem('userPresets', JSON.stringify(next));
+    setActivePresetId(entry.id);
+    setActivePresetName(entry.name);
+    flash('マイプリセットに保存しました');
+  }
+
+  function randomizeAll() {
+    const seed = freshSeed();
+    let candidates = PRESETS;
+    if (randomCategory !== 'all') candidates = PRESETS.filter((preset) => preset.category.includes(randomCategory as never) || preset.tags.includes(randomCategory));
+    const preset = candidates[Math.floor(seededUnit(seed, 0) * candidates.length)] ?? PRESETS[0];
+    const next = presetDocument(preset);
+    next.seed = seed;
+    next.layers = next.layers.map((layer, index) => ({
+      ...layer,
+      rotation: layer.rotation + Math.round(seededUnit(seed, index, 10) * 28 - 14),
+      config: {
+        ...layer.config,
+        size: Math.round(layer.config.size * (0.82 + seededUnit(seed, index, 11) * 0.36)),
+        density: Math.round(46 + seededUnit(seed, index, 12) * 34),
+        roughness: Math.round(8 + seededUnit(seed, index, 13) * 48),
+        jitterPosition: Math.round(8 + seededUnit(seed, index, 14) * 54),
+        jitterRotation: Math.round(8 + seededUnit(seed, index, 15) * 58),
+        jitterSize: Math.round(4 + seededUnit(seed, index, 16) * 44),
+        jitterColor: Math.round(18 + seededUnit(seed, index, 17) * 62),
+        jitterOpacity: Math.round((index === 0 ? 6 : 16) + seededUnit(seed, index, 18) * 24),
+      },
+    }));
+    editor.replace(next);
+    setActivePresetId(preset.id);
+    setActivePresetName(`${preset.name} · おまかせ`);
+    setActiveLayerId(next.layers[0]?.id ?? '');
+    const recent = [cloneDocument(next), ...recentRandom].slice(0, 10);
+    setRecentRandom(recent);
+    try { window.localStorage.setItem('recentRandom', JSON.stringify(recent)); } catch { /* Keep in memory if quota is small. */ }
+    flash('新しい模様を生成しました');
+  }
+
+  function loadRandomHistory(document: EditorDocument, index: number) {
+    editor.replace(cloneDocument(document));
+    setActivePresetId(`random-history-${index}`);
+    setActivePresetName(`おまかせ履歴 ${index + 1}`);
+    setActiveLayerId(document.layers[0]?.id ?? '');
+    flash('おまかせ履歴を復元しました');
+  }
+
+  function randomizeColors() {
+    const seed = freshSeed();
+    const selected = PALETTE_OPTIONS[Math.floor(seededUnit(seed, 0, 30) * PALETTE_OPTIONS.length)];
+    editor.commit((document) => ({ ...document, seed, canvas: { ...document.canvas, background: selected.colors[0] }, palette: selected.colors.slice(1) }));
+    flash('配色を入れ替えました');
+  }
+
+  function applyColorMode(mode: (typeof AUTO_COLOR_MODES)[number][0]) {
+    const seed = freshSeed();
+    const palette = colorScheme(mode, seed);
+    editor.commit((document) => ({ ...document, seed, palette }));
+  }
+
+  function randomizePlacement() {
+    const seed = freshSeed();
+    editor.commit((document) => ({ ...document, seed, layers: document.layers.map((layer, index) => ({ ...layer, config: { ...layer.config, placement: PLACEMENT_TYPES[Math.floor(seededUnit(seed, index, 40) * PLACEMENT_TYPES.length)] } })) }));
+    flash('配置を入れ替えました');
+  }
+
+  async function copyShareUrl() {
+    try {
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('state', encodeShareState(currentDocument));
+      await navigator.clipboard.writeText(url.toString());
+      flash('再現URLをコピーしました');
+    } catch { flash('URLのコピーに失敗しました'); }
+  }
+
+  async function copySeed() {
+    await navigator.clipboard?.writeText(String(currentDocument.seed));
+    flash('Seedをコピーしました');
+  }
+
+  if (!activeLayer) return null;
+  const lineLike = ['lines', 'doubleLines', 'waves', 'zigzag', 'chevron', 'arcs', 'rings', 'radial'].includes(activeLayer.type);
+
+  return (
+    <div className={darkMode ? 'dark' : ''}>
+      <main className="flex h-dvh min-h-[680px] flex-col overflow-hidden bg-background text-foreground">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/80 bg-card px-3 sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground shadow-sm"><span className="text-[10px] font-black tracking-[-.12em]">KM</span></div>
+            <div className="min-w-0"><h1 className="truncate text-sm font-bold tracking-[.12em]">KIKAMOYO</h1><p className="hidden text-[10px] text-muted-foreground sm:block">幾何学模様を、3秒で。</p></div>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon-sm" aria-label="元に戻す" disabled={!editor.canUndo} onClick={editor.undo}><Undo2 /></Button>
+            <Button variant="ghost" size="icon-sm" aria-label="やり直す" disabled={!editor.canRedo} onClick={editor.redo}><Redo2 /></Button>
+            <Button variant="ghost" size="icon-sm" aria-label="設定をプリセット保存" onClick={saveUserPreset}><Save /></Button>
+            <Button variant="ghost" size="icon-sm" aria-label="再現URLを共有" onClick={copyShareUrl}><Share2 /></Button>
+            <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
+            <Button variant="ghost" size="icon-sm" aria-label={darkMode ? 'ライトモード' : 'ダークモード'} onClick={() => setDarkMode((value) => !value)}>{darkMode ? <Sun /> : <Moon />}</Button>
+            <ExportDialog document={currentDocument} name={activePresetName} />
+          </div>
+        </header>
+
+        <div className="editor-grid min-h-0 flex-1">
+          <aside className="left-panel min-h-0 overflow-y-auto border-r border-border bg-card">
+            <Tabs value={tab} onValueChange={setTab} className="h-full gap-0">
+              <TabsList variant="line" className="sticky top-0 z-20 grid h-12 w-full grid-cols-6 border-b border-border bg-card px-2">
+                <TabsTrigger value="pattern" aria-label="パターン"><Grid2X2 /></TabsTrigger>
+                <TabsTrigger value="color" aria-label="カラー"><Palette /></TabsTrigger>
+                <TabsTrigger value="rough" aria-label="崩し"><SlidersHorizontal /></TabsTrigger>
+                <TabsTrigger value="layers" aria-label="レイヤー"><Layers3 /></TabsTrigger>
+                <TabsTrigger value="canvas" aria-label="キャンバス"><Frame /></TabsTrigger>
+                <TabsTrigger value="presets" aria-label="プリセット"><WandSparkles /></TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="pattern" className="space-y-6 p-4">
+                <section>
+                  <div className="mb-3 flex items-center justify-between"><h2 className="section-label">パターン</h2><span className="max-w-32 truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground">{activeLayer.name}</span></div>
+                  <div className="space-y-3">
+                    <div className="space-y-1.5"><span className="text-xs font-medium">図形</span><Select value={activeLayer.type} onValueChange={(value) => value && editor.patchLayer(activeLayer.id, { type: value as typeof activeLayer.type })}><SelectTrigger className="w-full" aria-label="図形"><SelectValue /></SelectTrigger><SelectContent>{PATTERN_TYPES.map((value) => <SelectItem key={value} value={value}>{PATTERN_LABELS[value]}</SelectItem>)}</SelectContent></Select></div>
+                    <div className="space-y-1.5"><span className="text-xs font-medium">配置</span><Select value={activeLayer.config.placement} onValueChange={(value) => value && editor.patchLayerConfig(activeLayer.id, { placement: value as typeof activeLayer.config.placement })}><SelectTrigger className="w-full" aria-label="配置"><SelectValue /></SelectTrigger><SelectContent>{PLACEMENT_TYPES.map((value) => <SelectItem key={value} value={value}>{PLACEMENT_LABELS[value]}</SelectItem>)}</SelectContent></Select></div>
+                  </div>
+                </section>
+                <section className="space-y-5"><h2 className="section-label">かたち</h2>
+                  <RangeControl label={lineLike ? 'モチーフサイズ' : 'サイズ'} value={activeLayer.config.size} min={4} max={140} unit="px" onChange={(size) => editor.patchLayerConfig(activeLayer.id, { size })} />
+                  <RangeControl label="密度" value={activeLayer.config.density} min={10} max={100} unit="%" onChange={(density) => editor.patchLayerConfig(activeLayer.id, { density })} />
+                  <RangeControl label="間隔" value={activeLayer.config.gap} min={8} max={160} unit="px" onChange={(gap) => editor.patchLayerConfig(activeLayer.id, { gap })} />
+                  <RangeControl label="回転" value={activeLayer.rotation} min={-180} max={180} unit="°" onChange={(rotation) => editor.patchLayer(activeLayer.id, { rotation })} />
+                  {lineLike ? <RangeControl label="線幅" value={activeLayer.config.strokeWidth} min={0.5} max={14} step={0.5} unit="px" onChange={(strokeWidth) => editor.patchLayerConfig(activeLayer.id, { strokeWidth })} />
+                    : ['squares', 'rectangles'].includes(activeLayer.type) && <RangeControl label="角丸" value={activeLayer.config.cornerRadius} min={0} max={30} unit="px" onChange={(cornerRadius) => editor.patchLayerConfig(activeLayer.id, { cornerRadius })} />}
+                  {!lineLike && <div className="space-y-2"><span className="text-xs font-medium">描画</span><div className="grid grid-cols-3 gap-1.5">{([['fill', '塗り'], ['stroke', '線のみ'], ['both', '塗り＋線']] as const).map(([value, label]) => <Button key={value} size="sm" variant={activeLayer.config.fillMode === value ? 'secondary' : 'outline'} aria-pressed={activeLayer.config.fillMode === value} onClick={() => editor.patchLayerConfig(activeLayer.id, { fillMode: value })}>{label}</Button>)}</div></div>}
+                  {['ellipse', 'rectangles'].includes(activeLayer.type) && <><RangeControl label="横サイズ" value={Math.round(activeLayer.config.aspectX * 100)} min={30} max={220} unit="%" onChange={(aspectX) => editor.patchLayerConfig(activeLayer.id, { aspectX: aspectX / 100 })} /><RangeControl label="縦サイズ" value={Math.round(activeLayer.config.aspectY * 100)} min={30} max={220} unit="%" onChange={(aspectY) => editor.patchLayerConfig(activeLayer.id, { aspectY: aspectY / 100 })} /></>}
+                </section>
+              </TabsContent>
+
+              <TabsContent value="color" className="space-y-6 p-4">
+                <section className="space-y-3"><div className="flex items-center justify-between"><h2 className="section-label">背景</h2><span className="text-[10px] text-muted-foreground">最大8色</span></div>
+                  <div className="grid grid-cols-[42px_1fr] gap-2"><input aria-label="背景色" type="color" value={currentDocument.canvas.background} onChange={(event) => editor.patchCanvas({ background: event.target.value })} className="h-9 w-10 cursor-pointer rounded-lg border border-border bg-transparent p-1" /><HexInput label="背景色のHEX値" value={currentDocument.canvas.background} onCommit={(background) => editor.patchCanvas({ background })} /></div>
+                </section>
+                <section className="space-y-3"><h2 className="section-label">定番パレット</h2><div className="grid grid-cols-2 gap-2">{PALETTE_OPTIONS.map((option) => <button key={option.id} type="button" className="rounded-lg border border-border bg-background p-2 text-left transition hover:border-primary/45" onClick={() => editor.commit((document) => ({ ...document, canvas: { ...document.canvas, background: option.colors[0] }, palette: option.colors.slice(1) }))}><span className="mb-1.5 block truncate text-[10px] font-semibold">{PALETTE_LABELS[option.id] ?? option.id}</span><span className="flex overflow-hidden rounded-full">{option.colors.map((color) => <span key={color} className="h-2.5 flex-1" style={{ background: color }} />)}</span></button>)}</div></section>
+                <section className="space-y-2"><h2 className="section-label">パレット</h2>
+                  {currentDocument.palette.map((color, index) => <div key={`${index}-${color}`} className="grid grid-cols-[34px_1fr_28px] items-center gap-2"><input aria-label={`カラー${index + 1}`} type="color" value={color} onChange={(event) => editor.commit((document) => ({ ...document, palette: document.palette.map((value, colorIndex) => colorIndex === index ? event.target.value : value) }))} className="size-8 cursor-pointer rounded-md border border-border bg-transparent p-1" /><HexInput label={`カラー${index + 1}のHEX値`} value={color} onCommit={(nextColor) => editor.commit((document) => ({ ...document, palette: document.palette.map((value, colorIndex) => colorIndex === index ? nextColor : value) }))} /><span className="text-center text-[10px] text-muted-foreground">{index + 1}</span></div>)}
+                  <div className="flex gap-2 pt-1"><Button size="sm" variant="outline" disabled={currentDocument.palette.length >= 8} onClick={() => editor.commit((document) => ({ ...document, palette: [...document.palette, '#ffffff'].slice(0, 8) }))}><Plus />色を追加</Button><Button size="sm" variant="ghost" disabled={currentDocument.palette.length <= 1} onClick={() => editor.commit((document) => ({ ...document, palette: document.palette.slice(0, -1) }))}>最後を削除</Button></div>
+                </section>
+                <section className="space-y-3"><h2 className="section-label">自動配色</h2><div className="grid grid-cols-2 gap-2">{AUTO_COLOR_MODES.map(([value, label]) => <Button key={value} size="sm" variant="outline" onClick={() => applyColorMode(value)}>{label}</Button>)}</div></section>
+              </TabsContent>
+
+              <TabsContent value="rough" className="space-y-6 p-4">
+                <div><h2 className="section-label">崩し具合</h2><p className="mt-1 text-xs leading-relaxed text-muted-foreground">同じSeedなら、調整後も同じ揺らぎを再現できます。</p></div>
+                <RangeControl label="全体の崩し" value={activeLayer.config.roughness} min={0} max={100} unit="%" onChange={(roughness) => editor.patchLayerConfig(activeLayer.id, { roughness })} />
+                <div className="h-px bg-border" />
+                <RangeControl label="位置ランダム" value={activeLayer.config.jitterPosition} min={0} max={100} unit="%" onChange={(jitterPosition) => editor.patchLayerConfig(activeLayer.id, { jitterPosition })} />
+                <RangeControl label="回転ランダム" value={activeLayer.config.jitterRotation} min={0} max={100} unit="%" onChange={(jitterRotation) => editor.patchLayerConfig(activeLayer.id, { jitterRotation })} />
+                <RangeControl label="サイズランダム" value={activeLayer.config.jitterSize} min={0} max={100} unit="%" onChange={(jitterSize) => editor.patchLayerConfig(activeLayer.id, { jitterSize })} />
+                <RangeControl label="色ランダム" value={activeLayer.config.jitterColor} min={0} max={100} unit="%" onChange={(jitterColor) => editor.patchLayerConfig(activeLayer.id, { jitterColor })} />
+                <RangeControl label="透明度ランダム" value={activeLayer.config.jitterOpacity} min={0} max={100} unit="%" onChange={(jitterOpacity) => editor.patchLayerConfig(activeLayer.id, { jitterOpacity })} />
+              </TabsContent>
+
+              <TabsContent value="layers" className="space-y-4 p-4">
+                <div className="flex items-center justify-between"><div><h2 className="section-label">レイヤー</h2><p className="mt-1 text-[10px] text-muted-foreground">{currentDocument.layers.length} / 5</p></div><Button size="sm" variant="outline" disabled={currentDocument.layers.length >= 5} onClick={() => editor.addLayer(activeLayer)}><Plus />追加</Button></div>
+                <div className="space-y-2">{[...currentDocument.layers].reverse().map((layer) => <div key={layer.id} className={`flex items-center gap-2 rounded-xl border p-2 ${activeLayer.id === layer.id ? 'border-primary bg-accent/45' : 'border-border bg-background'}`}>
+                  <button type="button" className="min-w-0 flex-1 text-left" aria-pressed={activeLayer.id === layer.id} onClick={() => setActiveLayerId(layer.id)}><strong className="block truncate text-xs">{layer.name}</strong><span className="text-[9px] text-muted-foreground">{PATTERN_LABELS[layer.type]} · {PLACEMENT_LABELS[layer.config.placement]}</span></button>
+                  <Button size="icon-xs" variant="ghost" aria-label={`${layer.name}を${layer.visible ? '非表示' : '表示'}`} onClick={() => editor.patchLayer(layer.id, { visible: !layer.visible })}>{layer.visible ? <Eye /> : <EyeOff />}</Button>
+                </div>)}</div>
+                <div className="grid grid-cols-5 gap-1"><Button size="icon" variant="outline" aria-label={`${activeLayer.name}を複製`} disabled={currentDocument.layers.length >= 5} onClick={() => editor.duplicateLayer(activeLayer.id)}><CopyPlus /></Button><Button size="icon" variant="outline" aria-label={`${activeLayer.name}を上へ`} onClick={() => editor.moveLayer(activeLayer.id, 1)}><ArrowUp /></Button><Button size="icon" variant="outline" aria-label={`${activeLayer.name}を下へ`} onClick={() => editor.moveLayer(activeLayer.id, -1)}><ArrowDown /></Button><Button size="icon" variant="outline" aria-label={`${activeLayer.name}の表示を切り替え`} onClick={() => editor.patchLayer(activeLayer.id, { visible: !activeLayer.visible })}>{activeLayer.visible ? <Eye /> : <EyeOff />}</Button><Button size="icon" variant="destructive" aria-label={`${activeLayer.name}を削除`} disabled={currentDocument.layers.length <= 1} onClick={() => editor.removeLayer(activeLayer.id)}><Trash2 /></Button></div>
+                <RangeControl label="透明度" value={Math.round(activeLayer.opacity * 100)} min={0} max={100} unit="%" onChange={(opacity) => editor.patchLayer(activeLayer.id, { opacity: opacity / 100 })} />
+                <RangeControl label="拡大率" value={Math.round(activeLayer.scale * 100)} min={20} max={240} unit="%" onChange={(scale) => editor.patchLayer(activeLayer.id, { scale: scale / 100 })} />
+                <RangeControl label="X位置" value={activeLayer.offsetX} min={-256} max={256} unit="px" onChange={(offsetX) => editor.patchLayer(activeLayer.id, { offsetX })} />
+                <RangeControl label="Y位置" value={activeLayer.offsetY} min={-256} max={256} unit="px" onChange={(offsetY) => editor.patchLayer(activeLayer.id, { offsetY })} />
+                <div className="space-y-1.5"><span className="text-xs font-medium">描画モード</span><Select value={activeLayer.blendMode} onValueChange={(value) => value && editor.patchLayer(activeLayer.id, { blendMode: value as typeof activeLayer.blendMode })}><SelectTrigger className="w-full" aria-label="描画モード"><SelectValue /></SelectTrigger><SelectContent>{BLEND_MODES.map((mode) => <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>)}</SelectContent></Select></div>
+              </TabsContent>
+
+              <TabsContent value="canvas" className="space-y-5 p-4">
+                <section className="space-y-3"><h2 className="section-label">キャンバス</h2><Select onValueChange={(value) => { const size = value ? CANVAS_SIZES[Number(value)] : undefined; if (size) editor.patchCanvas({ width: size[1], height: size[2] }); }}><SelectTrigger className="w-full"><SelectValue placeholder={`${currentDocument.canvas.width} × ${currentDocument.canvas.height}`} /></SelectTrigger><SelectContent>{CANVAS_SIZES.map((size, index) => <SelectItem key={size[0]} value={String(index)}>{size[0]}</SelectItem>)}</SelectContent></Select>
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"><DeferredNumberInput label="キャンバス幅" value={currentDocument.canvas.width} min={64} max={8192} onCommit={(width) => editor.patchCanvas({ width })} /><span className="text-muted-foreground">×</span><DeferredNumberInput label="キャンバス高さ" value={currentDocument.canvas.height} min={64} max={8192} onCommit={(height) => editor.patchCanvas({ height })} /></div>
+                </section>
+                <section className="space-y-2"><div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3 text-xs"><span><strong className="block">シームレス</strong><span className="text-[10px] text-muted-foreground">上下左右へ継ぎ目なく反復</span></span><Switch checked={currentDocument.canvas.seamless} onCheckedChange={(seamless) => editor.patchCanvas({ seamless })} aria-label="シームレスを切り替え" /></div><div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3 text-xs"><span><strong className="block">背景を透明にする</strong><span className="text-[10px] text-muted-foreground">透過PNG / SVG用</span></span><Switch checked={currentDocument.canvas.transparent} onCheckedChange={(transparent) => editor.patchCanvas({ transparent })} aria-label="背景透過を切り替え" /></div></section>
+                <div className="space-y-1.5"><span className="text-xs font-medium">タイルサイズ</span><Select value={String(currentDocument.canvas.tileSize)} onValueChange={(value) => value && editor.patchCanvas({ tileSize: Number(value) })}><SelectTrigger className="w-full" aria-label="タイルサイズ"><SelectValue /></SelectTrigger><SelectContent>{[128, 256, 512, 1024].map((value) => <SelectItem key={value} value={String(value)}>{value} px</SelectItem>)}</SelectContent></Select></div>
+                <div className="rounded-lg border border-border bg-muted/35 p-3 text-[10px] leading-relaxed text-muted-foreground">最大描画オブジェクト数は5,000。超過する密度は自動的に安全な間隔へ調整されます。</div>
+              </TabsContent>
+
+              <TabsContent value="presets" className="mobile-preset-content h-[calc(100%-48px)] p-3"><PresetBrowser presets={filteredPresets} activeId={activePresetId} favorites={favorites} category={category} search={search} favoriteOnly={favoriteOnly} recentIds={recentIds} recentRandom={recentRandom} onCategory={setCategory} onSearch={setSearch} onFavoriteOnly={() => setFavoriteOnly((value) => !value)} onLoad={loadPreset} onLoadRandom={loadRandomHistory} onFavorite={toggleFavorite} /></TabsContent>
+            </Tabs>
+          </aside>
+
+          <section className="preview-stage relative min-h-0 overflow-hidden bg-muted/45 p-3 sm:p-6">
+            <div className="absolute inset-0 checker opacity-45" aria-hidden="true" />
+            <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border/70 bg-card/90 p-1 shadow-sm backdrop-blur-md sm:top-4">
+              <Button size="xs" variant={!tilePreview ? 'secondary' : 'ghost'} aria-pressed={!tilePreview} onClick={() => setTilePreview(false)}>通常</Button><Button size="xs" variant={tilePreview ? 'secondary' : 'ghost'} aria-pressed={tilePreview} onClick={() => setTilePreview(true)}>3×3 タイル</Button><span className="mx-1 h-4 w-px bg-border" /><Button size="icon-xs" variant="ghost" aria-label="縮小" onClick={() => setZoom((value) => Math.max(.45, value - .1))}><ZoomOut /></Button><span className="min-w-9 text-center text-[10px] tabular-nums">{Math.round(zoom * 100)}%</span><Button size="icon-xs" variant="ghost" aria-label="拡大" onClick={() => setZoom((value) => Math.min(2, value + .1))}><ZoomIn /></Button><Button size="icon-xs" variant="ghost" aria-label="全体表示" onClick={() => setZoom(1)}><Maximize /></Button>
+            </div>
+            <div className="relative mx-auto flex h-full max-w-[1120px] items-center justify-center overflow-auto pt-8">
+              <div className="canvas-wrap relative max-h-full w-full overflow-hidden rounded-[18px] bg-white shadow-[0_22px_70px_rgb(15_23_42/16%)] ring-1 ring-black/8 transition-transform" style={{ aspectRatio: tilePreview ? '1 / 1' : `${currentDocument.canvas.width} / ${currentDocument.canvas.height}`, transform: `scale(${zoom})` }}>
+                <PatternCanvas id="pattern-canvas" document={currentDocument} tilePreview={tilePreview} maxObjects={2400} className="h-full w-full" />
+                <div className="absolute bottom-3 left-3 rounded-md bg-black/65 px-2 py-1 text-[10px] font-medium text-white/90 backdrop-blur-sm">{tilePreview ? `${currentDocument.canvas.tileSize}px タイル × 9` : `${currentDocument.canvas.width} × ${currentDocument.canvas.height}`} · {currentDocument.canvas.seamless ? 'シームレス' : '通常'}</div>
+              </div>
+            </div>
+          </section>
+
+          <aside className="preset-panel min-h-0 overflow-hidden border-l border-border bg-card p-3.5"><PresetBrowser presets={filteredPresets} activeId={activePresetId} favorites={favorites} category={category} search={search} favoriteOnly={favoriteOnly} recentIds={recentIds} recentRandom={recentRandom} onCategory={setCategory} onSearch={setSearch} onFavoriteOnly={() => setFavoriteOnly((value) => !value)} onLoad={loadPreset} onLoadRandom={loadRandomHistory} onFavorite={toggleFavorite} /></aside>
+        </div>
+
+        <footer className="flex h-auto shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-card px-2 py-2 sm:h-14 sm:flex-nowrap sm:px-4 sm:py-0">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto sm:flex-none">
+            <select aria-label="おまかせ生成カテゴリー" value={randomCategory} onChange={(event) => setRandomCategory(event.target.value)} className="h-8 max-w-[5.8rem] shrink-0 rounded-lg border border-input bg-background px-2 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-28">{RANDOM_CATEGORIES.map(([value, label], index) => <option key={`${value}-${index}`} value={value}>{label}</option>)}</select>
+            <Button className="shrink-0 bg-[#ad352f] text-white hover:bg-[#922b27]" onClick={randomizeAll}><Sparkles data-icon="inline-start" />おまかせ生成</Button>
+            <Button size="icon" variant="outline" aria-label="色だけランダム" onClick={randomizeColors}><Palette /></Button>
+            <Button size="icon" variant="outline" aria-label="配置だけランダム" onClick={randomizePlacement}><Shuffle /></Button>
+            <Button className="hidden sm:inline-flex" size="icon" variant="outline" aria-label="左右反転" onClick={() => editor.patchCanvas({ flipX: !currentDocument.canvas.flipX })}><FlipHorizontal2 /></Button>
+            <Button className="hidden sm:inline-flex" size="icon" variant="outline" aria-label="上下反転" onClick={() => editor.patchCanvas({ flipY: !currentDocument.canvas.flipY })}><FlipVertical2 /></Button>
+            <Button className="hidden sm:inline-flex" size="icon" variant="outline" aria-label="90度回転" onClick={() => editor.commit((document) => ({ ...document, layers: document.layers.map((layer) => ({ ...layer, rotation: layer.rotation + 90 })) }))}><RotateCw /></Button>
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 py-1">
+            <span className="hidden text-[10px] font-semibold uppercase tracking-wider text-muted-foreground sm:block">Seed</span><input key={currentDocument.seed} aria-label="Seed値" className="w-[4.8rem] bg-transparent text-right font-mono text-xs font-semibold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring" type="number" min={1} max={2147483647} defaultValue={currentDocument.seed} onBlur={(event) => { const parsed = Math.round(Number(event.currentTarget.value)); const seed = Number.isFinite(parsed) ? Math.min(2147483647, Math.max(1, parsed)) : currentDocument.seed; event.currentTarget.value = String(seed); editor.commit((document) => ({ ...document, seed })); }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+            <Button variant="ghost" size="icon-xs" aria-label="seedを再生成" onClick={() => editor.commit((document) => ({ ...document, seed: freshSeed() }))}><Shuffle /></Button><Button variant="ghost" size="icon-xs" aria-label="seedをコピー" onClick={copySeed}><Copy /></Button>
+          </div>
+        </footer>
+
+        <div aria-live="polite" className={`pointer-events-none fixed bottom-20 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-4 py-2 text-xs font-medium text-background shadow-lg transition ${notice ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'}`}>{notice && <><Check className="size-3.5" />{notice}</>}</div>
+      </main>
+    </div>
+  );
+}
