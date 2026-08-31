@@ -1,27 +1,8 @@
 'use client';
 
 import { memo, useId } from 'react';
-import type { EditorDocument, PatternLayer, PatternType } from '@/lib/pattern-types';
-import { hashUnit } from '@/lib/seed';
-
-interface Instance {
-  key: string;
-  x: number;
-  y: number;
-  rotation: number;
-  scaleX: number;
-  scaleY: number;
-  opacity: number;
-  colorIndex: number;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function modulo(value: number, divisor: number) {
-  return ((value % divisor) + divisor) % divisor;
-}
+import type { EditorDocument, PatternType } from '@/lib/pattern-types';
+import { addSeamlessCopies, createBaseInstances, modulo } from '@/lib/pattern-layout';
 
 function polygonPoints(sides: number, radius: number, start = -90) {
   return Array.from({ length: sides }, (_, index) => {
@@ -78,109 +59,6 @@ function Shape({ type, size, aspectX, aspectY, strokeWidth, cornerRadius, fillMo
   }
 }
 
-function enrich(layer: PatternLayer, seed: number, key: number, x: number, y: number, baseRotation: number, step: number, paletteLength: number): Instance {
-  const rough = layer.config.roughness / 100;
-  const posPower = Math.max(rough, layer.config.jitterPosition / 100);
-  const rotPower = Math.max(rough, layer.config.jitterRotation / 100);
-  const sizePower = Math.max(rough, layer.config.jitterSize / 100);
-  const opacityPower = Math.max(rough, layer.config.jitterOpacity / 100);
-  const jitter = step * 0.18 * posPower;
-  return {
-    key: `${key}`,
-    x: x + (hashUnit(seed, layer.id, key, 0) * 2 - 1) * jitter,
-    y: y + (hashUnit(seed, layer.id, key, 1) * 2 - 1) * jitter,
-    rotation: baseRotation + (hashUnit(seed, layer.id, key, 2) * 2 - 1) * 38 * rotPower,
-    scaleX: clamp(1 + (hashUnit(seed, layer.id, key, 3) * 2 - 1) * 0.32 * sizePower, 0.48, 1.52),
-    scaleY: clamp(1 + (hashUnit(seed, layer.id, key, 4) * 2 - 1) * 0.32 * sizePower, 0.48, 1.52),
-    opacity: clamp(1 - hashUnit(seed, layer.id, key, 5) * 0.38 * opacityPower, 0.3, 1),
-    colorIndex: layer.config.jitterColor > 0
-      ? Math.floor(hashUnit(seed, layer.id, key, 6) * Math.max(1, paletteLength))
-      : (key + layer.colorIndex) % Math.max(1, paletteLength),
-  };
-}
-
-function baseInstances(layer: PatternLayer, tile: number, seed: number, maxObjects: number, paletteLength: number) {
-  const density = clamp(layer.config.density, 10, 100);
-  let step = Math.max(7, layer.config.gap * (60 / density));
-  const placement = layer.config.placement;
-  const result: Instance[] = [];
-
-  if (['radial', 'concentric', 'kaleidoscope', 'symmetric'].includes(placement)) {
-    const rings = placement === 'concentric' ? 4 : 3;
-    let key = 0;
-    for (let ring = 0; ring < rings; ring += 1) {
-      const count = placement === 'symmetric' ? 8 : 10 + ring * 6;
-      const radius = placement === 'concentric' ? (ring + 1) * tile * 0.075 : tile * (0.09 + ring * 0.08);
-      for (let index = 0; index < count; index += 1) {
-        const angle = (index / count) * Math.PI * 2 + (ring % 2 ? Math.PI / count : 0);
-        result.push(enrich(layer, seed, key, tile / 2 + Math.cos(angle) * radius, tile / 2 + Math.sin(angle) * radius, (angle * 180) / Math.PI + 90, step, paletteLength));
-        key += 1;
-      }
-    }
-    if (placement === 'kaleidoscope') {
-      return result.map((item, index) => ({ ...item, rotation: index % 2 ? -item.rotation : item.rotation })).slice(0, maxObjects);
-    }
-    return result.slice(0, maxObjects);
-  }
-
-  if (placement === 'random' || placement === 'pseudoRandom') {
-    const count = Math.min(maxObjects, Math.max(12, Math.round((tile * tile) / (step * step) * 0.68)));
-    for (let index = 0; index < count; index += 1) {
-      const x = hashUnit(seed, layer.id, index, placement === 'random' ? 20 : 30) * tile;
-      const y = hashUnit(seed, layer.id, index, placement === 'random' ? 21 : 31) * tile;
-      result.push(enrich(layer, seed, index, x, y, hashUnit(seed, layer.id, index, 22) * 360, step, paletteLength));
-    }
-    return result.slice(0, maxObjects);
-  }
-
-  if (placement === 'stripe') {
-    const columns = Math.max(2, Math.round(tile / step));
-    step = tile / columns;
-    for (let column = 0; column < columns; column += 1) {
-      result.push(enrich(layer, seed, column, (column + 0.5) * step, tile / 2, 0, step, paletteLength));
-    }
-    return result.slice(0, maxObjects);
-  }
-
-  let columns = Math.max(1, Math.round(tile / step));
-  let rows = Math.max(1, Math.round(tile / step));
-  if (columns * rows > maxObjects) {
-    const factor = Math.sqrt((columns * rows) / maxObjects);
-    columns = Math.max(1, Math.floor(columns / factor));
-    rows = Math.max(1, Math.floor(rows / factor));
-  }
-  const stepX = tile / columns;
-  const stepY = tile / rows;
-  let key = 0;
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      if (placement === 'checker' && (row + column) % 2 === 1) continue;
-      let x = (column + 0.5) * stepX;
-      let y = (row + 0.5) * stepY;
-      if (['offsetGrid', 'brick', 'hexGrid', 'diagonal'].includes(placement) && row % 2 === 1) x += stepX / 2;
-      if (placement === 'wave') y += Math.sin((column / Math.max(1, columns)) * Math.PI * 2) * stepY * 0.28;
-      const rotation = placement === 'diagonal' ? 45 : 0;
-      result.push(enrich(layer, seed, key, x % tile, y, rotation, Math.min(stepX, stepY), paletteLength));
-      key += 1;
-    }
-  }
-  return result.slice(0, maxObjects);
-}
-
-function withSeamlessCopies(instances: Instance[], layer: PatternLayer, tile: number) {
-  const spanningStripe = ['lines', 'doubleLines'].includes(layer.type) && layer.config.placement === 'stripe';
-  const margin = spanningStripe ? tile : Math.min(tile, layer.config.size * layer.scale * 1.5 + layer.config.gap * 0.2);
-  return instances.flatMap((item) => {
-    const xOffsets = [0];
-    const yOffsets = [0];
-    if (item.x < margin) xOffsets.push(tile);
-    if (item.x > tile - margin) xOffsets.push(-tile);
-    if (item.y < margin) yOffsets.push(tile);
-    if (item.y > tile - margin) yOffsets.push(-tile);
-    return xOffsets.flatMap((dx) => yOffsets.map((dy) => ({ ...item, key: `${item.key}:${dx}:${dy}`, x: item.x + dx, y: item.y + dy })));
-  });
-}
-
 export const PatternCanvas = memo(function PatternCanvas({ document, id, className, tilePreview = false, maxObjects = 5000, label = '生成した幾何学模様' }: {
   document: EditorDocument;
   id?: string;
@@ -190,9 +68,12 @@ export const PatternCanvas = memo(function PatternCanvas({ document, id, classNa
   label?: string;
 }) {
   const reactId = useId().replaceAll(':', '');
-  const tile = document.canvas.seamless ? document.canvas.tileSize : Math.max(document.canvas.width, document.canvas.height);
-  const viewWidth = tilePreview ? tile * 3 : document.canvas.width;
-  const viewHeight = tilePreview ? tile * 3 : document.canvas.height;
+  const seamless = document.canvas.seamless;
+  const previewTiling = tilePreview && seamless;
+  const patternWidth = seamless ? document.canvas.tileSize : document.canvas.width;
+  const patternHeight = seamless ? document.canvas.tileSize : document.canvas.height;
+  const viewWidth = previewTiling ? patternWidth * 3 : document.canvas.width;
+  const viewHeight = previewTiling ? patternHeight * 3 : document.canvas.height;
   const visibleLayerCount = Math.max(1, document.layers.filter((layer) => layer.visible).length);
   const layerLimit = Math.max(1, Math.floor(maxObjects / visibleLayerCount));
   const transform = `translate(${viewWidth / 2} ${viewHeight / 2}) scale(${document.canvas.flipX ? -1 : 1} ${document.canvas.flipY ? -1 : 1}) translate(${-viewWidth / 2} ${-viewHeight / 2})`;
@@ -203,22 +84,23 @@ export const PatternCanvas = memo(function PatternCanvas({ document, id, classNa
       <title id={`title-${reactId}`}>{label}</title>
       <defs>
         {document.layers.filter((layer) => layer.visible).map((layer) => {
-          const baseLimit = document.canvas.seamless ? Math.max(1, Math.floor(layerLimit / 9)) : layerLimit;
-          const base = baseInstances(layer, tile, document.seed, baseLimit, document.palette.length);
+          const base = createBaseInstances(layer, patternWidth, patternHeight, document.seed, layerLimit, document.palette.length);
           const offsetInstances = base.map((instance) => ({
             ...instance,
-            x: document.canvas.seamless ? modulo(instance.x + layer.offsetX, tile) : instance.x + layer.offsetX,
-            y: document.canvas.seamless ? modulo(instance.y + layer.offsetY, tile) : instance.y + layer.offsetY,
+            x: seamless ? modulo(instance.x + layer.offsetX, patternWidth) : instance.x + layer.offsetX,
+            y: seamless ? modulo(instance.y + layer.offsetY, patternHeight) : instance.y + layer.offsetY,
           }));
-          const instances = (document.canvas.seamless ? withSeamlessCopies(offsetInstances, layer, tile) : offsetInstances).slice(0, layerLimit);
-          const patternId = `pattern-${reactId}-${layer.id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
           const lineLike = ['lines', 'doubleLines'].includes(layer.type) && layer.config.placement === 'stripe';
+          const visualSize = lineLike ? Math.max(patternWidth, patternHeight) * 1.55 : layer.config.size;
+          const instances = seamless
+            ? addSeamlessCopies(offsetInstances, layer, patternWidth, layerLimit, visualSize)
+            : offsetInstances;
+          const patternId = `pattern-${reactId}-${layer.id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
           return (
-            <pattern key={layer.id} id={patternId} width={tile} height={tile} patternUnits="userSpaceOnUse">
+            <pattern key={layer.id} id={patternId} width={patternWidth} height={patternHeight} patternUnits="userSpaceOnUse">
               <g>
                 {instances.map((instance) => {
                   const color = document.palette[instance.colorIndex % document.palette.length] ?? '#111827';
-                  const visualSize = lineLike ? tile * 1.55 : layer.config.size;
                   return (
                     <g key={instance.key} transform={`translate(${instance.x} ${instance.y}) rotate(${instance.rotation + layer.rotation}) scale(${instance.scaleX * layer.scale} ${instance.scaleY * layer.scale})`} opacity={instance.opacity}>
                       <Shape type={layer.type} size={visualSize} aspectX={layer.config.aspectX} aspectY={layer.config.aspectY}
@@ -240,9 +122,9 @@ export const PatternCanvas = memo(function PatternCanvas({ document, id, classNa
             style={{ mixBlendMode: layer.blendMode }} />;
         })}
       </g>
-      {tilePreview && <g aria-hidden="true" fill="none" stroke="rgba(255,255,255,.68)" strokeWidth={Math.max(1, tile / 260)} strokeDasharray={`${tile / 36} ${tile / 50}`}>
-        <path d={`M ${tile} 0V${viewHeight}M${tile * 2} 0V${viewHeight}M0 ${tile}H${viewWidth}M0 ${tile * 2}H${viewWidth}`} />
-        <rect x={tile} y={tile} width={tile} height={tile} stroke="rgba(255,255,255,.95)" strokeWidth={Math.max(2, tile / 150)} />
+      {previewTiling && <g aria-hidden="true" fill="none" stroke="rgba(255,255,255,.68)" strokeWidth={Math.max(1, patternWidth / 260)} strokeDasharray={`${patternWidth / 36} ${patternWidth / 50}`}>
+        <path d={`M ${patternWidth} 0V${viewHeight}M${patternWidth * 2} 0V${viewHeight}M0 ${patternHeight}H${viewWidth}M0 ${patternHeight * 2}H${viewWidth}`} />
+        <rect x={patternWidth} y={patternHeight} width={patternWidth} height={patternHeight} stroke="rgba(255,255,255,.95)" strokeWidth={Math.max(2, patternWidth / 150)} />
       </g>}
     </svg>
   );

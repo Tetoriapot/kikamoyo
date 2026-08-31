@@ -83,6 +83,21 @@ export interface EditorDocument {
   layers: PatternLayer[];
 }
 
+export interface OmakaseGeneration {
+  kind: 'omakase';
+  category: string;
+  algorithmVersion: 1;
+}
+
+export interface EditorSnapshot {
+  sessionVersion: 1;
+  document: EditorDocument;
+  presetId: string | null;
+  presetName: string;
+  activeLayerId: string | null;
+  generation?: OmakaseGeneration;
+}
+
 export type PresetCategory = 'basic' | 'line' | 'wave' | 'circle' | 'block' | 'japanese' | 'artdeco' | 'retro' | 'scifi' | 'magic';
 
 export interface PatternPreset {
@@ -110,4 +125,110 @@ export const CANVAS_SIZES = [
 
 export function cloneDocument(document: EditorDocument): EditorDocument {
   return JSON.parse(JSON.stringify(document)) as EditorDocument;
+}
+
+export function cloneSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
+  return JSON.parse(JSON.stringify(snapshot)) as EditorSnapshot;
+}
+
+const BLEND_MODE_VALUES: readonly BlendMode[] = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference'];
+const FILL_MODE_VALUES: readonly FillMode[] = ['fill', 'stroke', 'both'];
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isFiniteInRange(value: unknown, min: number, max: number) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+}
+
+function isIntegerInRange(value: unknown, min: number, max: number) {
+  return typeof value === 'number' && Number.isInteger(value) && isFiniteInRange(value, min, max);
+}
+
+function isPatternConfig(value: unknown): value is PatternConfig {
+  if (!isRecord(value)) return false;
+  return PLACEMENT_TYPES.includes(value.placement as PlacementType)
+    && isFiniteInRange(value.size, 0.1, 100_000)
+    && isFiniteInRange(value.aspectX, 0.01, 100)
+    && isFiniteInRange(value.aspectY, 0.01, 100)
+    && isFiniteInRange(value.gap, 0.1, 100_000)
+    && isFiniteInRange(value.density, 0, 1_000)
+    && isFiniteInRange(value.strokeWidth, 0, 10_000)
+    && isFiniteInRange(value.cornerRadius, 0, 100_000)
+    && FILL_MODE_VALUES.includes(value.fillMode as FillMode)
+    && isFiniteInRange(value.roughness, 0, 100)
+    && isFiniteInRange(value.jitterPosition, 0, 100)
+    && isFiniteInRange(value.jitterRotation, 0, 100)
+    && isFiniteInRange(value.jitterSize, 0, 100)
+    && isFiniteInRange(value.jitterColor, 0, 100)
+    && isFiniteInRange(value.jitterOpacity, 0, 100);
+}
+
+function isPatternLayer(value: unknown): value is PatternLayer {
+  if (!isRecord(value)) return false;
+  return typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 256
+    && typeof value.name === 'string' && value.name.length > 0 && value.name.length <= 256
+    && PATTERN_TYPES.includes(value.type as PatternType)
+    && typeof value.visible === 'boolean'
+    && isFiniteInRange(value.opacity, 0, 1)
+    && BLEND_MODE_VALUES.includes(value.blendMode as BlendMode)
+    && isFiniteInRange(value.offsetX, -100_000, 100_000)
+    && isFiniteInRange(value.offsetY, -100_000, 100_000)
+    && isFiniteInRange(value.rotation, -100_000, 100_000)
+    && isFiniteInRange(value.scale, 0.01, 100)
+    && isIntegerInRange(value.colorIndex, 0, 10_000)
+    && isPatternConfig(value.config);
+}
+
+export function isEditorDocument(value: unknown): value is EditorDocument {
+  if (!isRecord(value) || value.schemaVersion !== 1 || !isIntegerInRange(value.seed, 1, 2_147_483_647)) return false;
+  if (!Array.isArray(value.palette) || value.palette.length < 1 || value.palette.length > 8
+    || !value.palette.every((color) => typeof color === 'string' && HEX_COLOR.test(color))) return false;
+  if (!isRecord(value.canvas)) return false;
+  const canvas = value.canvas;
+  if (!isIntegerInRange(canvas.width, 64, 16_384)
+    || !isIntegerInRange(canvas.height, 64, 16_384)
+    || typeof canvas.background !== 'string' || !HEX_COLOR.test(canvas.background)
+    || typeof canvas.transparent !== 'boolean'
+    || typeof canvas.seamless !== 'boolean'
+    || !isIntegerInRange(canvas.tileSize, 64, 4_096)
+    || typeof canvas.flipX !== 'boolean'
+    || typeof canvas.flipY !== 'boolean') return false;
+  if (!Array.isArray(value.layers) || value.layers.length < 1 || value.layers.length > 5 || !value.layers.every(isPatternLayer)) return false;
+  return new Set(value.layers.map((layer) => layer.id)).size === value.layers.length;
+}
+
+export function isEditorSnapshot(value: unknown): value is EditorSnapshot {
+  if (!isRecord(value) || value.sessionVersion !== 1 || !isEditorDocument(value.document)) return false;
+  if (value.presetId !== null && (typeof value.presetId !== 'string' || value.presetId.length > 256)) return false;
+  if (typeof value.presetName !== 'string' || value.presetName.length < 1 || value.presetName.length > 256) return false;
+  if (value.activeLayerId !== null && typeof value.activeLayerId !== 'string') return false;
+  if (value.generation !== undefined) {
+    if (!isRecord(value.generation) || value.generation.kind !== 'omakase'
+      || typeof value.generation.category !== 'string' || value.generation.category.length > 64
+      || value.generation.algorithmVersion !== 1) return false;
+  }
+  return true;
+}
+
+export function normalizeSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
+  const next = cloneSnapshot(snapshot);
+  if (!next.document.layers.some((layer) => layer.id === next.activeLayerId)) {
+    next.activeLayerId = next.document.layers[0]?.id ?? null;
+  }
+  return next;
+}
+
+export function parseEditorSnapshot(value: unknown, fallbackName = '復元した模様'): EditorSnapshot | null {
+  if (isEditorSnapshot(value)) return normalizeSnapshot(value);
+  if (!isEditorDocument(value)) return null;
+  return {
+    sessionVersion: 1,
+    document: cloneDocument(value),
+    presetId: null,
+    presetName: fallbackName,
+    activeLayerId: value.layers[0]?.id ?? null,
+  };
 }

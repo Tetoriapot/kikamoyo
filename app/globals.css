@@ -48,7 +48,7 @@
 }
 
 :root {
-  --font-kikamoyo: Inter, "Noto Sans JP", "Yu Gothic UI", Meiryo, system-ui, sans-serif;
+  --font-kikamoyo: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, system-ui, sans-serif;
   --background: oklch(0.985 0.006 85);
   --foreground: oklch(0.22 0.028 268);
   --card: oklch(0.998 0.002 85);
@@ -64,9 +64,9 @@
   --accent: oklch(0.94 0.035 180);
   --accent-foreground: oklch(0.26 0.04 192);
   --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.89 0.012 78);
-  --input: var(--border);
-  --ring: oklch(0.61 0.09 186);
+  --border: oklch(0.82 0.014 78);
+  --input: oklch(0.64 0.018 78);
+  --ring: oklch(0.47 0.1 186);
   --chart-1: oklch(0.68 0.17 28);
   --chart-2: oklch(0.68 0.11 180);
   --chart-3: oklch(0.35 0.06 272);
@@ -99,8 +99,8 @@
   --accent: oklch(0.3 0.055 192);
   --accent-foreground: oklch(0.92 0.025 180);
   --destructive: oklch(0.7 0.18 22);
-  --border: oklch(1 0 0 / 11%);
-  --input: oklch(1 0 0 / 15%);
+  --border: oklch(1 0 0 / 24%);
+  --input: oklch(0.58 0.018 270);
   --ring: oklch(0.72 0.09 181);
   --sidebar: var(--card);
   --sidebar-foreground: var(--foreground);
@@ -113,7 +113,7 @@
 }
 
 @layer base {
-  * { @apply border-border outline-ring/50; }
+  * { @apply border-border outline-ring; }
   html { @apply font-sans; }
   body { @apply bg-background text-foreground; }
 }
@@ -121,6 +121,10 @@
 html, body { height: 100%; overscroll-behavior: none; }
 body { font-family: var(--font-kikamoyo); }
 button, input { font: inherit; }
+:where(button, a, input, select, textarea, [role="button"], [role="tab"], [role="switch"]):focus-visible {
+  outline: 2px solid var(--ring) !important;
+  outline-offset: 2px;
+}
 
 .editor-grid {
   display: grid;
@@ -142,8 +146,7 @@ button, input { font: inherit; }
 }
 .canvas-wrap { width: 100%; max-width: min(100%, calc((100dvh - 174px) * 1.42)); max-height: 100%; }
 .export-source { position: fixed; left: -20000px; top: 0; width: 512px; height: 512px; overflow: hidden; pointer-events: none; opacity: 0; }
-footer > div:first-child { overflow-x: auto; scrollbar-width: none; }
-footer > div:first-child::-webkit-scrollbar { display: none; }
+.preset-card { content-visibility: auto; contain-intrinsic-size: 180px; }
 * { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent) transparent; }
 
 @media (max-width: 1020px) {
@@ -154,12 +157,31 @@ footer > div:first-child::-webkit-scrollbar { display: none; }
 @media (max-width: 720px) {
   main { min-height: 560px !important; }
   .editor-grid { grid-template-columns: 1fr; grid-template-rows: minmax(260px, 46dvh) minmax(0, 1fr); grid-template-areas: "preview" "left"; }
+  @supports (reading-flow: grid-rows) { .editor-grid { reading-flow: grid-rows; } }
   .left-panel { border-right: 0; border-top: 1px solid var(--border); }
   .preview-stage { padding: 10px; }
   .canvas-wrap { max-width: 100%; }
-  header [data-slot="dialog-trigger"] { width: 1.75rem; padding: 0; font-size: 0; }
+  header { padding-inline: .4rem; }
+  header > div:first-child { gap: .4rem; }
+  header [data-slot="button"] { width: 2rem; height: 2rem; }
+  header [data-slot="dialog-trigger"] { width: 2rem; padding: 0; font-size: 0; }
   header [data-slot="dialog-trigger"] svg { width: .9rem; height: .9rem; }
+  .editor-tabs-list [data-slot="tabs-trigger"] { min-height: 2.75rem; }
   .mobile-preset-content { min-height: 420px; }
+  .mobile-touch { width: 2.5rem !important; height: 2.5rem !important; }
+  .mobile-seed-action { width: 2rem !important; height: 2rem !important; }
+  .editor-footer { min-height: 6.25rem; }
+  .footer-secondary { justify-content: space-between; }
+}
+
+@media (max-width: 340px) {
+  header > div:first-child > div:first-child { display: none; }
+  header h1 { font-size: .72rem; }
+}
+
+@media (max-height: 679px) and (min-width: 721px) {
+  main { min-height: 100dvh !important; }
+  .canvas-wrap { max-width: min(100%, calc((100dvh - 150px) * 1.42)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

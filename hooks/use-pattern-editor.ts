@@ -2,58 +2,93 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INITIAL_PRESET, presetDocument } from '@/data/presets';
-import type { CanvasConfig, EditorDocument, PatternConfig, PatternLayer } from '@/lib/pattern-types';
-import { cloneDocument } from '@/lib/pattern-types';
+import type {
+  CanvasConfig, EditorDocument, EditorSnapshot, OmakaseGeneration, PatternConfig, PatternLayer,
+} from '@/lib/pattern-types';
+import {
+  cloneDocument, cloneSnapshot, normalizeSnapshot, parseEditorSnapshot,
+} from '@/lib/pattern-types';
 
 interface HistoryState {
-  past: EditorDocument[];
-  present: EditorDocument;
-  future: EditorDocument[];
+  past: EditorSnapshot[];
+  present: EditorSnapshot;
+  future: EditorSnapshot[];
 }
 
 type DocumentUpdater = EditorDocument | ((document: EditorDocument) => EditorDocument);
+type RestoreStatus = 'initial' | 'session' | 'shared' | 'invalid-shared';
 
-function isDocument(value: unknown): value is EditorDocument {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<EditorDocument>;
-  return candidate.schemaVersion === 1 && typeof candidate.seed === 'number' && Array.isArray(candidate.layers)
-    && Array.isArray(candidate.palette) && Boolean(candidate.canvas);
+interface ReplaceOptions {
+  presetId?: string | null;
+  presetName?: string;
+  activeLayerId?: string | null;
+  generation?: OmakaseGeneration;
+}
+
+const INITIAL_SNAPSHOT: EditorSnapshot = {
+  sessionVersion: 1,
+  document: presetDocument(INITIAL_PRESET),
+  presetId: INITIAL_PRESET.id,
+  presetName: INITIAL_PRESET.name,
+  activeLayerId: INITIAL_PRESET.document.layers[0]?.id ?? null,
+};
+
+function decodeState(value: string) {
+  if (value.length > 250_000) throw new Error('Shared state is too large');
+  const normalized = value.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const binary = window.atob(normalized);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+}
+
+function removeInvalidStateFromUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('state');
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 export function usePatternEditor() {
-  const [history, setHistory] = useState<HistoryState>({ past: [], present: presetDocument(INITIAL_PRESET), future: [] });
+  const [history, setHistory] = useState<HistoryState>({ past: [], present: cloneSnapshot(INITIAL_SNAPSHOT), future: [] });
   const [hydrated, setHydrated] = useState(false);
+  const [restoreStatus, setRestoreStatus] = useState<RestoreStatus>('initial');
   const lastCommitAt = useRef(0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const shared = params.get('state');
-        if (shared) {
-          const normalized = shared.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(shared.length / 4) * 4, '=');
-          const binary = window.atob(normalized);
-          const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-          const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-          if (isDocument(parsed)) {
-            lastCommitAt.current = 0;
-            setHistory({ past: [], present: parsed, future: [] });
-          }
-        } else {
+      const params = new URLSearchParams(window.location.search);
+      const shared = params.get('state');
+      let restored: EditorSnapshot | null = null;
+      let status: RestoreStatus = 'initial';
+
+      if (shared) {
+        try {
+          restored = parseEditorSnapshot(decodeState(shared), '共有された模様');
+          status = restored ? 'shared' : 'invalid-shared';
+        } catch {
+          status = 'invalid-shared';
+        }
+        if (!restored) removeInvalidStateFromUrl();
+      }
+
+      if (!restored) {
+        try {
           const saved = window.localStorage.getItem('lastSession');
           if (saved) {
-            const parsed: unknown = JSON.parse(saved);
-            if (isDocument(parsed)) {
-              lastCommitAt.current = 0;
-              setHistory({ past: [], present: parsed, future: [] });
-            }
+            restored = parseEditorSnapshot(JSON.parse(saved) as unknown);
+            if (restored && status !== 'invalid-shared') status = 'session';
+            if (!restored) window.localStorage.removeItem('lastSession');
           }
+        } catch {
+          // Storage may be unavailable or contain malformed JSON. The initial preset remains safe.
         }
-      } catch {
-        window.localStorage.removeItem('lastSession');
-      } finally {
-        setHydrated(true);
       }
+
+      if (restored) {
+        lastCommitAt.current = 0;
+        setHistory({ past: [], present: restored, future: [] });
+      }
+      setRestoreStatus(status);
+      setHydrated(true);
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -71,17 +106,47 @@ export function usePatternEditor() {
     const coalesce = lastCommitAt.current > 0 && committedAt - lastCommitAt.current <= 220;
     lastCommitAt.current = committedAt;
     setHistory((current) => {
-      const draft = cloneDocument(current.present);
-      const next = typeof updater === 'function' ? updater(draft) : cloneDocument(updater);
-      if (JSON.stringify(next) === JSON.stringify(current.present)) return current;
+      const draft = cloneDocument(current.present.document);
+      const nextDocument = typeof updater === 'function' ? updater(draft) : cloneDocument(updater);
+      if (JSON.stringify(nextDocument) === JSON.stringify(current.present.document)) return current;
+      const next = normalizeSnapshot({ ...current.present, document: nextDocument });
       const past = coalesce ? current.past : [...current.past, current.present].slice(-20);
       return { past, present: next, future: [] };
     });
   }, []);
 
-  const replace = useCallback((document: EditorDocument) => {
+  const replace = useCallback((document: EditorDocument, options: ReplaceOptions = {}) => {
     lastCommitAt.current = 0;
-    setHistory((current) => ({ past: [...current.past, current.present].slice(-20), present: cloneDocument(document), future: [] }));
+    setHistory((current) => {
+      const next = normalizeSnapshot({
+        sessionVersion: 1,
+        document: cloneDocument(document),
+        presetId: options.presetId ?? null,
+        presetName: options.presetName ?? 'カスタム模様',
+        activeLayerId: options.activeLayerId ?? document.layers[0]?.id ?? null,
+        ...(options.generation ? { generation: options.generation } : {}),
+      });
+      return { past: [...current.past, current.present].slice(-20), present: next, future: [] };
+    });
+  }, []);
+
+  const setIdentity = useCallback((options: ReplaceOptions) => {
+    setHistory((current) => ({
+      ...current,
+      present: normalizeSnapshot({
+        ...current.present,
+        presetId: options.presetId === undefined ? current.present.presetId : options.presetId,
+        presetName: options.presetName ?? current.present.presetName,
+        activeLayerId: options.activeLayerId === undefined ? current.present.activeLayerId : options.activeLayerId,
+        ...(options.generation === undefined ? {} : { generation: options.generation }),
+      }),
+    }));
+  }, []);
+
+  const setActiveLayerId = useCallback((activeLayerId: string) => {
+    setHistory((current) => current.present.document.layers.some((layer) => layer.id === activeLayerId)
+      ? { ...current, present: { ...current.present, activeLayerId } }
+      : current);
   }, []);
 
   const undo = useCallback(() => {
@@ -151,8 +216,28 @@ export function usePatternEditor() {
   }), [commit]);
 
   return {
-    document: history.present, commit, replace, undo, redo,
-    canUndo: history.past.length > 0, canRedo: history.future.length > 0,
-    patchCanvas, patchLayer, patchLayerConfig, addLayer, removeLayer, duplicateLayer, moveLayer,
+    snapshot: history.present,
+    document: history.present.document,
+    presetId: history.present.presetId,
+    presetName: history.present.presetName,
+    activeLayerId: history.present.activeLayerId,
+    generation: history.present.generation,
+    hydrated,
+    restoreStatus,
+    commit,
+    replace,
+    setIdentity,
+    setActiveLayerId,
+    undo,
+    redo,
+    canUndo: history.past.length > 0,
+    canRedo: history.future.length > 0,
+    patchCanvas,
+    patchLayer,
+    patchLayerConfig,
+    addLayer,
+    removeLayer,
+    duplicateLayer,
+    moveLayer,
   };
 }

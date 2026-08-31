@@ -53,12 +53,13 @@ export async function downloadRaster(options: {
   name: string;
   format: 'png' | 'jpg' | 'webp';
 }) {
+  const effectiveTransparent = options.format === 'jpg' ? false : options.transparent;
   const pixelWidth = options.width * options.scale;
   const pixelHeight = options.height * options.scale;
   if (pixelWidth * pixelHeight > 64_000_000 || pixelWidth > 16384 || pixelHeight > 16384) {
     throw new Error('このサイズと倍率の組み合わせは大きすぎます。倍率かサイズを下げてください。');
   }
-  const source = serializedSvg(options.elementId, pixelWidth, pixelHeight, options.transparent, options.background);
+  const source = serializedSvg(options.elementId, pixelWidth, pixelHeight, effectiveTransparent, options.background);
   const url = URL.createObjectURL(new Blob([source], { type: 'image/svg+xml;charset=utf-8' }));
   try {
     const image = new Image();
@@ -73,7 +74,7 @@ export async function downloadRaster(options: {
     canvas.height = pixelHeight;
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Canvasを初期化できませんでした。');
-    if (!options.transparent && options.format !== 'png') {
+    if (options.format === 'jpg' || !effectiveTransparent) {
       context.fillStyle = options.background;
       context.fillRect(0, 0, pixelWidth, pixelHeight);
     }
