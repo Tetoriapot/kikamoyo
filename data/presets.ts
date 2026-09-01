@@ -22,6 +22,16 @@ const PALETTES = {
   cream: ['#FBF5E9', '#30475E', '#D56A5B', '#7B9E87', '#D7B56D'],
   darkfantasy: ['#0D0814', '#7B2CBF', '#C77DFF', '#D4AF37', '#3C6E71'],
   magic: ['#15102C', '#BDE0FE', '#C77DFF', '#FEE440', '#F694C1'],
+  polygonSunset: ['#3A2630', '#F8EB66', '#E7B54E', '#C9784D', '#75443E', '#302A3B'],
+  polygonPrism: ['#151A36', '#F4F20B', '#58D91D', '#12A5CE', '#3C2AA9', '#D40B8C', '#FF6A13'],
+  polygonHoney: ['#A96522', '#FFF6A1', '#F5D85D', '#E9B83E', '#C98226', '#FFE56C'],
+  polygonBlue: ['#E9F2FF', '#D8E7FB', '#A8C7EF', '#789BDE', '#5850C8', '#2D267C'],
+  polygonLavender: ['#F2EFFF', '#D9D6F7', '#B5B2E8', '#8983D7', '#6758C4', '#403489'],
+  memphisMint: ['#F1F1EF', '#3475C5', '#F29A24', '#7BCAC4', '#FFFFFF', '#194A8F'],
+  memphisCyan: ['#FBFBF7', '#63D2EE', '#FFE600', '#1F83B8', '#E8F7FF', '#F4C91C'],
+  shardPastel: ['#F8FCFD', '#8EEAF0', '#F6AEE0', '#FFF19A', '#B9F5F1', '#D4C6FF'],
+  shardNeon: ['#090D20', '#5EF2E7', '#FF4FA3', '#806DFF', '#F9E547', '#2EC4FF'],
+  curveMono: ['#FFFFFF', '#DADDE0', '#B8BEC4', '#8D959D', '#5E6872'],
 } as const;
 
 type PaletteName = keyof typeof PALETTES;
@@ -182,10 +192,107 @@ export const PRESETS: PatternPreset[] = GROUPS.flatMap((group, groupIndex) => gr
   };
 }));
 
+interface StyleSpec {
+  id: string;
+  name: string;
+  type: Extract<PatternType, 'lowPoly' | 'glassShards' | 'geoCollage' | 'quarterTiles'>;
+  palette: PaletteName;
+  size: number;
+  gap: number;
+  density: number;
+  roughness: number;
+  rotation?: number;
+  transparent?: boolean;
+  seamless?: boolean;
+  opacity?: number;
+  blendMode?: PatternLayer['blendMode'];
+  randomRotation?: boolean;
+  randomColor?: boolean;
+  randomOpacity?: boolean;
+  tags: string[];
+  secondLayer?: Partial<Omit<StyleSpec, 'id' | 'name' | 'palette' | 'tags' | 'secondLayer'>>;
+}
+
+const STYLE_SPECS: StyleSpec[] = [
+  { id: 'abstract-101', name: 'サンセットローポリ', type: 'lowPoly', palette: 'polygonSunset', size: 118, gap: 96, density: 58, roughness: 62, rotation: 34, randomColor: true, seamless: false, tags: ['lowpoly', 'polygon', 'warm', 'sunset'] },
+  { id: 'abstract-102', name: 'レインボークリスタル', type: 'lowPoly', palette: 'polygonPrism', size: 106, gap: 88, density: 64, roughness: 76, rotation: -22, randomColor: true, seamless: false, tags: ['lowpoly', 'polygon', 'rainbow', 'vivid'] },
+  { id: 'abstract-103', name: 'ハニーグロー', type: 'lowPoly', palette: 'polygonHoney', size: 128, gap: 104, density: 52, roughness: 48, rotation: 65, randomColor: true, seamless: false, tags: ['lowpoly', 'polygon', 'yellow', 'gold'] },
+  { id: 'abstract-104', name: 'ブルーファセット', type: 'lowPoly', palette: 'polygonBlue', size: 138, gap: 118, density: 46, roughness: 54, rotation: 24, randomColor: true, seamless: false, tags: ['lowpoly', 'polygon', 'blue', 'calm'] },
+  { id: 'abstract-105', name: 'ラベンダーファセット', type: 'lowPoly', palette: 'polygonLavender', size: 124, gap: 110, density: 52, roughness: 68, rotation: -36, randomColor: true, seamless: false, tags: ['lowpoly', 'polygon', 'purple', 'soft'] },
+  { id: 'abstract-106', name: 'レギュラートライアングル', type: 'lowPoly', palette: 'polygonHoney', size: 92, gap: 84, density: 72, roughness: 0, rotation: 0, randomColor: true, seamless: true, tags: ['lowpoly', 'triangle', 'regular', 'seamless'] },
+  { id: 'abstract-107', name: 'ミントメンフィス', type: 'geoCollage', palette: 'memphisMint', size: 42, gap: 94, density: 58, roughness: 44, randomRotation: true, randomColor: true, tags: ['memphis', 'collage', 'mix', 'mint'] },
+  { id: 'abstract-108', name: 'シアンレモン', type: 'geoCollage', palette: 'memphisCyan', size: 38, gap: 82, density: 66, roughness: 56, randomRotation: true, randomColor: true, tags: ['memphis', 'collage', 'cyan', 'yellow'] },
+  { id: 'abstract-109', name: '80sカラーミックス', type: 'geoCollage', palette: 'vivid', size: 46, gap: 78, density: 72, roughness: 72, randomRotation: true, randomColor: true, tags: ['memphis', 'collage', '80s', 'colorful'] },
+  { id: 'abstract-110', name: 'モノクロポップ', type: 'geoCollage', palette: 'monochrome', size: 40, gap: 88, density: 62, roughness: 38, randomRotation: true, tags: ['memphis', 'collage', 'monochrome', 'pop'] },
+  { id: 'abstract-111', name: 'パステルリボン', type: 'glassShards', palette: 'shardPastel', size: 66, gap: 34, density: 82, roughness: 88, randomRotation: true, randomColor: true, randomOpacity: true, opacity: 0.86, tags: ['shards', 'lines', 'pastel', 'transparent'] },
+  { id: 'abstract-112', name: 'アイスシャード', type: 'glassShards', palette: 'polygonBlue', size: 78, gap: 28, density: 70, roughness: 76, rotation: 18, randomRotation: true, randomColor: true, randomOpacity: true, opacity: 0.78, tags: ['shards', 'glass', 'blue', 'ice'] },
+  { id: 'abstract-113', name: 'ネオンストリーム', type: 'glassShards', palette: 'shardNeon', size: 72, gap: 30, density: 88, roughness: 94, randomRotation: true, randomColor: true, randomOpacity: true, opacity: 0.92, blendMode: 'screen', tags: ['shards', 'lines', 'neon', 'dark'] },
+  { id: 'abstract-114', name: 'クォーターサークル', type: 'quarterTiles', palette: 'curveMono', size: 82, gap: 84, density: 68, roughness: 0, tags: ['quarter', 'curve', 'tile', 'minimal'] },
+  { id: 'abstract-115', name: '透明背景カーブタイル', type: 'quarterTiles', palette: 'curveMono', size: 88, gap: 88, density: 72, roughness: 0, transparent: true, tags: ['quarter', 'curve', 'tile', 'transparent'] },
+  { id: 'abstract-116', name: 'デュオフラワー', type: 'quarterTiles', palette: 'pastel', size: 86, gap: 90, density: 64, roughness: 0, randomColor: true, tags: ['quarter', 'curve', 'flower', 'pastel'], secondLayer: { type: 'quarterTiles', size: 58, gap: 90, density: 64, roughness: 0, rotation: 180, opacity: 0.66, randomColor: true } },
+  { id: 'abstract-117', name: 'アーチチェッカー', type: 'quarterTiles', palette: 'memphisMint', size: 78, gap: 80, density: 78, roughness: 0, randomRotation: true, randomColor: true, tags: ['quarter', 'curve', 'checker', 'modern'] },
+];
+
+function styleLayer(spec: StyleSpec, index = 0): PatternLayer {
+  const placement: PlacementType = spec.type === 'glassShards' || spec.type === 'geoCollage' ? 'random' : 'grid';
+  const result = layer(`${spec.id}-layer-${index + 1}`, index === 0 ? spec.name : '重なり', spec.type, placement, spec.size, spec.gap, spec.rotation ?? 0, spec.roughness, index);
+  result.opacity = spec.opacity ?? 1;
+  result.blendMode = spec.blendMode ?? 'normal';
+  result.config.density = spec.density;
+  result.config.strokeWidth = 0;
+  result.config.fillMode = 'fill';
+  result.config.jitterPosition = spec.roughness;
+  result.config.jitterRotation = spec.randomRotation ? 100 : Math.round(spec.roughness * 0.45);
+  result.config.jitterSize = Math.round(spec.roughness * 0.55);
+  result.config.jitterColor = spec.randomColor ? 100 : Math.round(spec.roughness * 0.45);
+  result.config.jitterOpacity = spec.randomOpacity ? 80 : Math.round(spec.roughness * 0.18);
+  return result;
+}
+
+function makeStyleDocument(spec: StyleSpec): EditorDocument {
+  const colors = [...PALETTES[spec.palette]];
+  const layers = [styleLayer(spec)];
+  if (spec.secondLayer) {
+    const secondSpec: StyleSpec = { ...spec, ...spec.secondLayer, id: spec.id, name: spec.name, palette: spec.palette, tags: spec.tags, secondLayer: undefined };
+    const second = styleLayer(secondSpec, 1);
+    second.offsetX = spec.gap / 2;
+    second.offsetY = spec.gap / 2;
+    layers.push(second);
+  }
+  return {
+    schemaVersion: 1,
+    seed: stableSeed(spec.id),
+    palette: colors.slice(1),
+    canvas: {
+      width: 1080,
+      height: 1080,
+      background: colors[0],
+      transparent: spec.transparent ?? false,
+      seamless: spec.seamless ?? true,
+      tileSize: spec.type === 'geoCollage' || spec.type === 'glassShards' ? 1024 : 512,
+      flipX: false,
+      flipY: false,
+    },
+    layers,
+  };
+}
+
+export const STYLE_PRESETS: PatternPreset[] = STYLE_SPECS.map((spec) => ({
+  id: spec.id,
+  name: spec.name,
+  category: ['abstract'],
+  categoryLabel: 'ABSTRACT',
+  tags: [...new Set(['abstract', 'background', 'procedural', spec.type, spec.seamless === false ? 'poster' : 'seamless', ...spec.tags])],
+  document: makeStyleDocument(spec),
+}));
+
+export const ALL_PRESETS: PatternPreset[] = [...STYLE_PRESETS, ...PRESETS];
+
 export const INITIAL_PRESET = PRESETS.find((preset) => preset.name === '80sメンフィス') ?? PRESETS[0];
 
 export const CATEGORY_OPTIONS = [
   { value: 'all', label: 'すべて' },
+  { value: 'abstract', label: 'ABSTRACT' },
   ...GROUPS.map((group) => ({ value: group.id, label: group.label })),
 ] as const;
 

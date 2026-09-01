@@ -1,4 +1,4 @@
-const CACHE = 'kikamoyo-v3';
+const CACHE = 'kikamoyo-v4';
 const SHELL_KEY = '/__kikamoyo_app_shell__';
 const CORE = ['/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png'];
 const ASSET_PATH = /(?:\.(?:js|css|mjs|json|svg|png|webp|jpg|jpeg|woff2?)(?:$|\?))|(?:\/_next\/)|(?:\/assets\/)/i;

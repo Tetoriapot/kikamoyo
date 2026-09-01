@@ -1,9 +1,10 @@
-import { PRESETS, presetDocument } from '@/data/presets';
+import { ALL_PRESETS, PRESETS, presetDocument } from '@/data/presets';
 import { hashUnit } from '@/lib/seed';
 import type { EditorDocument, OmakaseGeneration, PatternPreset } from '@/lib/pattern-types';
 
 export const OMAKASE_CATEGORIES = [
   ['all', '完全ランダム'], ['basic', 'シンプル'], ['cute', 'かわいい'], ['cool', 'クール'],
+  ['abstract', '抽象背景'],
   ['japanese', '和風'], ['retro', 'レトロ'], ['scifi', 'SF'], ['magic', '魔法'],
   ['artdeco', '高級'], ['pop', 'ポップ'], ['dark', 'ダーク'], ['trpg', 'TRPG'], ['background', '背景向け'],
 ] as const;
@@ -25,15 +26,16 @@ export function normalizeOmakaseSeed(seed: number) {
   return Math.min(2_147_483_647, Math.max(1, Math.round(seed)));
 }
 
-export function generateOmakase(seedInput: number, categoryInput: string): OmakaseResult {
+export function generateOmakase(seedInput: number, categoryInput: string, algorithmVersion: 1 | 2 = 2): OmakaseResult {
   const seed = normalizeOmakaseSeed(seedInput);
   const category = OMAKASE_CATEGORIES.some(([value]) => value === categoryInput)
     ? categoryInput as OmakaseCategory
     : 'all';
+  const source = algorithmVersion === 1 ? PRESETS : ALL_PRESETS;
   const filtered = category === 'all'
-    ? PRESETS
-    : PRESETS.filter((preset) => preset.category.includes(category as never) || preset.tags.includes(category));
-  const candidates = filtered.length ? filtered : PRESETS;
+    ? source
+    : source.filter((preset) => preset.category.includes(category as never) || preset.tags.includes(category));
+  const candidates = filtered.length ? filtered : source;
   const preset = candidates[Math.floor(seededUnit(seed, 0) * candidates.length)] ?? PRESETS[0];
   const document = presetDocument(preset);
   document.seed = seed;
@@ -56,6 +58,15 @@ export function generateOmakase(seedInput: number, categoryInput: string): Omaka
   return {
     document,
     preset,
-    generation: { kind: 'omakase', category, algorithmVersion: 1 },
+    generation: { kind: 'omakase', category, algorithmVersion },
   };
+}
+
+export function inferLegacyOmakaseGeneration(document: EditorDocument): OmakaseGeneration | undefined {
+  const signature = JSON.stringify(document);
+  for (const [category] of OMAKASE_CATEGORIES) {
+    const candidate = generateOmakase(document.seed, category, 1);
+    if (JSON.stringify(candidate.document) === signature) return candidate.generation;
+  }
+  return undefined;
 }

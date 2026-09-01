@@ -2,6 +2,7 @@ export const PATTERN_TYPES = [
   'dots', 'circles', 'ellipse', 'squares', 'rectangles', 'triangles', 'diamonds',
   'hexagons', 'octagons', 'stars', 'crosses', 'lines', 'doubleLines', 'waves',
   'zigzag', 'chevron', 'arcs', 'rings', 'radial',
+  'lowPoly', 'glassShards', 'geoCollage', 'quarterTiles',
 ] as const;
 
 export type PatternType = (typeof PATTERN_TYPES)[number];
@@ -11,6 +12,7 @@ export const PATTERN_LABELS: Record<PatternType, string> = {
   triangles: '三角形', diamonds: 'ひし形', hexagons: '六角形', octagons: '八角形',
   stars: '星', crosses: '十字', lines: '線', doubleLines: '二重線', waves: '波線',
   zigzag: 'ジグザグ', chevron: '山形', arcs: '円弧', rings: 'リング', radial: '放射',
+  lowPoly: 'ローポリ', glassShards: 'ラインコラージュ', geoCollage: '幾何学ミックス', quarterTiles: 'カーブタイル',
 };
 
 export const PLACEMENT_TYPES = [
@@ -86,7 +88,7 @@ export interface EditorDocument {
 export interface OmakaseGeneration {
   kind: 'omakase';
   category: string;
-  algorithmVersion: 1;
+  algorithmVersion: 1 | 2;
 }
 
 export interface EditorSnapshot {
@@ -98,7 +100,7 @@ export interface EditorSnapshot {
   generation?: OmakaseGeneration;
 }
 
-export type PresetCategory = 'basic' | 'line' | 'wave' | 'circle' | 'block' | 'japanese' | 'artdeco' | 'retro' | 'scifi' | 'magic';
+export type PresetCategory = 'abstract' | 'basic' | 'line' | 'wave' | 'circle' | 'block' | 'japanese' | 'artdeco' | 'retro' | 'scifi' | 'magic';
 
 export interface PatternPreset {
   id: string;
@@ -208,7 +210,7 @@ export function isEditorSnapshot(value: unknown): value is EditorSnapshot {
   if (value.generation !== undefined) {
     if (!isRecord(value.generation) || value.generation.kind !== 'omakase'
       || typeof value.generation.category !== 'string' || value.generation.category.length > 64
-      || value.generation.algorithmVersion !== 1) return false;
+      || ![1, 2].includes(value.generation.algorithmVersion as number)) return false;
   }
   return true;
 }

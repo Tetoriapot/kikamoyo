@@ -27,7 +27,7 @@ void test('the service worker separates navigation fallback from asset misses', 
   assert.match(worker, /SHELL_KEY/);
   assert.match(worker, /cacheAssetTree/);
   assert.doesNotMatch(worker, /cached \|\| caches\.match\('\/'\)/);
-  assert.match(worker, /kikamoyo-v3/);
+  assert.match(worker, /kikamoyo-v4/);
   assert.match(worker, /htmlAssetReferences/);
   assert.match(worker, /cssAssetReferences/);
   assert.doesNotMatch(worker, /type\.includes\('javascript'\)/);
