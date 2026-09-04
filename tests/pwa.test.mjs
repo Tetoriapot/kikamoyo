@@ -8,7 +8,9 @@ function pngDimensions(buffer) {
 }
 
 void test('the manifest contains install and maskable icons with matching raster sizes', async () => {
-  const manifest = JSON.parse(await readFile('public/manifest.webmanifest', 'utf8'));
+  const manifest = JSON.parse(
+    await readFile('public/manifest.webmanifest', 'utf8'),
+  );
   const required = [
     ['icon-192.png', 192],
     ['icon-512.png', 512],
@@ -16,9 +18,15 @@ void test('the manifest contains install and maskable icons with matching raster
   ];
   for (const [name, size] of required) {
     assert.ok(manifest.icons.some((icon) => icon.src === `/${name}`));
-    assert.deepEqual(pngDimensions(await readFile(`public/${name}`)), { width: size, height: size });
+    assert.deepEqual(pngDimensions(await readFile(`public/${name}`)), {
+      width: size,
+      height: size,
+    });
   }
-  assert.deepEqual(pngDimensions(await readFile('public/apple-touch-icon.png')), { width: 180, height: 180 });
+  assert.deepEqual(
+    pngDimensions(await readFile('public/apple-touch-icon.png')),
+    { width: 180, height: 180 },
+  );
 });
 
 void test('the service worker separates navigation fallback from asset misses', async () => {
@@ -27,7 +35,8 @@ void test('the service worker separates navigation fallback from asset misses', 
   assert.match(worker, /SHELL_KEY/);
   assert.match(worker, /cacheAssetTree/);
   assert.doesNotMatch(worker, /cached \|\| caches\.match\('\/'\)/);
-  assert.match(worker, /kikamoyo-v4/);
+  assert.match(worker, /kikamoyo-v5/);
+  assert.match(worker, /pathname\.startsWith\('\/api\/'\)/);
   assert.match(worker, /htmlAssetReferences/);
   assert.match(worker, /cssAssetReferences/);
   assert.doesNotMatch(worker, /type\.includes\('javascript'\)/);

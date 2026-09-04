@@ -1,0 +1,61 @@
+export type Locale = 'ja' | 'en';
+
+const COPY = {
+  ja: {
+    simple: 'やさしい',
+    detail: '詳細',
+    create: 'つくる',
+    color: '色',
+    size: 'サイズ',
+    presets: '見本',
+    pattern: 'パターン',
+    rough: '崩し',
+    layers: 'レイヤー',
+    canvas: 'キャンバス',
+    projects: 'プロジェクト',
+    display: '表示と言語',
+    export: '書き出し',
+    currentPattern: '現在の模様',
+    safeArea: '安全域',
+    density: '細かさ',
+    variation: 'ばらつき',
+    opacity: '濃さ',
+    generated: '生成した幾何学模様',
+    skipMain: '本文へ',
+    skipPreview: '模様プレビューへ',
+    skipControls: '編集設定へ',
+    skipPresets: 'プリセットへ',
+    skipQuick: 'クイック操作へ',
+  },
+  en: {
+    simple: 'Easy',
+    detail: 'Advanced',
+    create: 'Create',
+    color: 'Color',
+    size: 'Size',
+    presets: 'Presets',
+    pattern: 'Pattern',
+    rough: 'Variation',
+    layers: 'Layers',
+    canvas: 'Canvas',
+    projects: 'Projects',
+    display: 'Display & language',
+    export: 'Export',
+    currentPattern: 'Current pattern',
+    safeArea: 'Safe area',
+    density: 'Detail',
+    variation: 'Variation',
+    opacity: 'Opacity',
+    generated: 'Generated geometric pattern',
+    skipMain: 'Skip to main content',
+    skipPreview: 'Skip to pattern preview',
+    skipControls: 'Skip to editor controls',
+    skipPresets: 'Skip to presets',
+    skipQuick: 'Skip to quick actions',
+  },
+} as const;
+
+export type CopyKey = keyof typeof COPY.ja;
+export function t(locale: Locale, key: CopyKey) {
+  return COPY[locale][key];
+}
