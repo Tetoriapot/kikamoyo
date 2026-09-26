@@ -193,13 +193,62 @@ void test('only exact untouched legacy and v3 presets are migrated', () => {
   );
 
   const edited = structuredClone(v3.document);
-  edited.layers[0].config.size += 1;
+  edited.layers[1].config.size += 1;
   assert.equal(
     presetModule.migrateUnmodifiedBuiltInPresetDocument(id, edited),
     null,
   );
   assert.equal(
     presetModule.migrateUnmodifiedBuiltInPresetDocument(null, v3.document),
+    null,
+  );
+});
+
+void test('automatic secondary layers are removed while a customized primary is preserved', () => {
+  const id = 'retro-072';
+  const historicalPresets = [
+    presetModule.LEGACY_PRESETS.find((preset) => preset.id === id),
+    presetModule.V3_PRESETS.find((preset) => preset.id === id),
+  ];
+
+  for (const historical of historicalPresets) {
+    const hybrid = structuredClone(historical.document);
+    hybrid.layers[0].type = 'geoCollage';
+    hybrid.layers[0].config.placement = 'random';
+    hybrid.layers[0].config.size += 7;
+    for (const layer of hybrid.layers.slice(1)) layer.visible = !layer.visible;
+
+    const expected = structuredClone(hybrid);
+    expected.layers = [expected.layers[0]];
+    assert.deepEqual(
+      presetModule.migrateUnmodifiedBuiltInPresetDocument(id, hybrid),
+      expected,
+    );
+  }
+});
+
+void test('edited secondary layers and manually added layers are never removed', () => {
+  const id = 'retro-072';
+  const original = presetModule.V3_PRESETS.find(
+    (preset) => preset.id === id,
+  ).document;
+
+  const editedSecondary = structuredClone(original);
+  editedSecondary.layers[0].config.size += 7;
+  editedSecondary.layers[1].visible = !editedSecondary.layers[1].visible;
+  editedSecondary.layers[1].config.gap += 1;
+  assert.equal(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(id, editedSecondary),
+    null,
+  );
+
+  const manualExtra = structuredClone(original);
+  manualExtra.layers[0].config.size += 7;
+  const added = structuredClone(manualExtra.layers[0]);
+  added.id = `${id}-manual-layer`;
+  manualExtra.layers.push(added);
+  assert.equal(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(id, manualExtra),
     null,
   );
 });

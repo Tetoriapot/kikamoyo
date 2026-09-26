@@ -1241,10 +1241,27 @@ export function migrateUnmodifiedBuiltInPresetDocument(
     .filter((preset): preset is PatternPreset => Boolean(preset));
   const signature = JSON.stringify(document);
   if (
-    !historical.some((preset) => JSON.stringify(preset.document) === signature)
+    historical.some((preset) => JSON.stringify(preset.document) === signature)
   )
-    return null;
-  return cloneDocument(current.document);
+    return cloneDocument(current.document);
+
+  const removableSecondaryLayers = historical.some((preset) => {
+    if (document.layers.length !== preset.document.layers.length) return false;
+    if (document.layers[0]?.id !== preset.document.layers[0]?.id) return false;
+    return document.layers.slice(1).every((candidate, index) => {
+      const generated = preset.document.layers[index + 1];
+      return (
+        generated !== undefined &&
+        JSON.stringify({ ...candidate, visible: generated.visible }) ===
+          JSON.stringify(generated)
+      );
+    });
+  });
+  if (!removableSecondaryLayers) return null;
+
+  const migrated = cloneDocument(document);
+  migrated.layers = migrated.layers.slice(0, 1);
+  return migrated;
 }
 
 export const INITIAL_PRESET =
