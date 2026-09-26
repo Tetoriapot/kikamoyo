@@ -17,7 +17,7 @@ void test('the manifest contains install and maskable icons with matching raster
     ['icon-maskable-512.png', 512],
   ];
   for (const [name, size] of required) {
-    assert.ok(manifest.icons.some((icon) => icon.src === `/${name}`));
+    assert.ok(manifest.icons.some((icon) => icon.src === name));
     assert.deepEqual(pngDimensions(await readFile(`public/${name}`)), {
       width: size,
       height: size,
@@ -27,6 +27,9 @@ void test('the manifest contains install and maskable icons with matching raster
     pngDimensions(await readFile('public/apple-touch-icon.png')),
     { width: 180, height: 180 },
   );
+  assert.equal(manifest.id, './');
+  assert.equal(manifest.start_url, './');
+  assert.equal(manifest.scope, './');
 });
 
 void test('the service worker separates navigation fallback from asset misses', async () => {
@@ -35,8 +38,9 @@ void test('the service worker separates navigation fallback from asset misses', 
   assert.match(worker, /SHELL_KEY/);
   assert.match(worker, /cacheAssetTree/);
   assert.doesNotMatch(worker, /cached \|\| caches\.match\('\/'\)/);
-  assert.match(worker, /kikamoyo-v5/);
-  assert.match(worker, /pathname\.startsWith\('\/api\/'\)/);
+  assert.match(worker, /kikamoyo-v6/);
+  assert.match(worker, /self\.registration\.scope/);
+  assert.match(worker, /pathname\.startsWith\(API_PATH\)/);
   assert.match(worker, /htmlAssetReferences/);
   assert.match(worker, /cssAssetReferences/);
   assert.doesNotMatch(worker, /type\.includes\('javascript'\)/);

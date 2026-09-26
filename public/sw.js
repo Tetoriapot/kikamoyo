@@ -1,13 +1,20 @@
-const CACHE = 'kikamoyo-v5';
-const SHELL_KEY = '/__kikamoyo_app_shell__';
+const CACHE = 'kikamoyo-v6';
+const APP_ROOT = new URL('./', self.registration.scope);
+const API_PATH = `${APP_ROOT.pathname.replace(/\/$/, '')}/api/`;
+
+function appUrl(path) {
+  return new URL(path.replace(/^\//, ''), APP_ROOT).href;
+}
+
+const SHELL_KEY = appUrl('__kikamoyo_app_shell__');
 const CORE = [
-  '/manifest.webmanifest',
-  '/favicon.svg',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/icon-maskable-512.png',
-  '/apple-touch-icon.png',
-];
+  'manifest.webmanifest',
+  'favicon.svg',
+  'icon-192.png',
+  'icon-512.png',
+  'icon-maskable-512.png',
+  'apple-touch-icon.png',
+].map(appUrl);
 const ASSET_PATH =
   /(?:\.(?:js|css|mjs|json|svg|png|webp|jpg|jpeg|woff2?)(?:$|\?))|(?:\/_next\/)|(?:\/assets\/)/i;
 
@@ -48,7 +55,7 @@ function cssAssetReferences(text, baseUrl) {
 }
 
 async function cacheAssetTree(cache, input, seen = new Set()) {
-  const url = new URL(input, self.location.origin).href;
+  const url = new URL(input, APP_ROOT).href;
   if (!sameOrigin(url) || seen.has(url)) return;
   seen.add(url);
   const response = await fetch(url, {
@@ -67,14 +74,14 @@ async function cacheAssetTree(cache, input, seen = new Set()) {
 
 async function precacheShell() {
   const cache = await caches.open(CACHE);
-  const response = await fetch('/', {
+  const response = await fetch(APP_ROOT, {
     cache: 'reload',
     credentials: 'same-origin',
   });
   if (!response.ok) throw new Error('App shell request failed');
   const html = await response.clone().text();
   await cache.put(SHELL_KEY, response);
-  const references = htmlAssetReferences(html, self.location.origin);
+  const references = htmlAssetReferences(html, APP_ROOT);
   await Promise.allSettled([
     ...CORE.map((url) => cacheAssetTree(cache, url)),
     ...references.map((url) => cacheAssetTree(cache, url)),
@@ -135,7 +142,7 @@ async function assetResponse(request) {
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
-  if (new URL(request.url).pathname.startsWith('/api/')) return;
+  if (new URL(request.url).pathname.startsWith(API_PATH)) return;
   if (request.mode === 'navigate') {
     event.respondWith(navigationResponse(request, event));
     return;

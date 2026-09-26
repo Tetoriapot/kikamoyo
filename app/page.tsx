@@ -46,6 +46,7 @@ import {
   type DisplayPreferences,
 } from '@/components/display-settings-dialog';
 import { BrandPaletteDialog } from '@/components/brand-palette-dialog';
+import { HeaderUtilityControls } from '@/components/header-utility-controls';
 import { ProjectManagerDialog } from '@/components/project-manager-dialog';
 import { RandomLockControls } from '@/components/random-lock-controls';
 import { SafeAreaOverlay } from '@/components/safe-area-overlay';
@@ -106,6 +107,25 @@ import {
   type PatternType,
   type RepeatMode,
 } from '@/lib/pattern-types';
+
+const PUBLIC_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(
+  /\/$/,
+  '',
+);
+const CLOUD_FEATURES_ENABLED =
+  process.env.NEXT_PUBLIC_CLOUD_ENABLED !== 'false';
+
+const LEGACY_LAYER_LABELS: Record<string, { ja: string; en: string }> = {
+  アクセント: { ja: 'レイヤー 2', en: 'Layer 2' },
+  ディテール: { ja: 'レイヤー 3', en: 'Layer 3' },
+  Accent: { ja: 'レイヤー 2', en: 'Layer 2' },
+  Detail: { ja: 'レイヤー 3', en: 'Layer 3' },
+};
+
+function patternLayerDisplayName(name: string, locale: Locale) {
+  const replacement = LEGACY_LAYER_LABELS[name];
+  return replacement ? replacement[locale] : name;
+}
 
 const AUTO_COLOR_MODES = [
   ['random', 'ランダム'],
@@ -364,7 +384,7 @@ function parseRandomHistory(value: unknown): RandomHistoryEntry[] {
       'category' in item.generation &&
       typeof item.generation.category === 'string' &&
       'algorithmVersion' in item.generation &&
-      [1, 2].includes(Number(item.generation.algorithmVersion))
+      [1, 2, 3].includes(Number(item.generation.algorithmVersion))
         ? (item.generation as OmakaseGeneration)
         : undefined;
     entries.push({
@@ -867,6 +887,9 @@ export default function Home() {
   const activeLayer =
     currentDocument.layers.find((layer) => layer.id === activeLayerId) ??
     currentDocument.layers[0];
+  const activeLayerName = activeLayer
+    ? patternLayerDisplayName(activeLayer.name, locale)
+    : '';
   const activeVisualStyle = activeLayer
     ? visualStyleForType(activeLayer.type)
     : 'repeat';
@@ -967,8 +990,17 @@ export default function Home() {
         setSettingsReady(true);
       }
     }, 0);
-    if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production')
-      navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+      const serviceWorkerPath = PUBLIC_BASE_PATH
+        ? `${PUBLIC_BASE_PATH}/sw.js`
+        : '/sw.js';
+      const serviceWorkerScope = PUBLIC_BASE_PATH
+        ? `${PUBLIC_BASE_PATH}/`
+        : '/';
+      navigator.serviceWorker
+        .register(serviceWorkerPath, { scope: serviceWorkerScope })
+        .catch(() => undefined);
+    }
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -993,6 +1025,8 @@ export default function Home() {
     }
     document.documentElement.lang = locale;
     document.documentElement.dataset.textSize = textSize;
+    document.documentElement.classList.toggle('dark', darkMode);
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
   }, [
     darkMode,
     editorMode,
@@ -1007,6 +1041,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!editor.hydrated || cloudShareLoaded.current) return;
+    if (!CLOUD_FEATURES_ENABLED) {
+      cloudShareLoaded.current = true;
+      return;
+    }
     const token = new URLSearchParams(window.location.search).get('cloud');
     if (!token) {
       cloudShareLoaded.current = true;
@@ -1372,7 +1410,7 @@ export default function Home() {
     const generated = generateOmakase(
       currentDocument.seed,
       category,
-      editor.generation?.algorithmVersion ?? 2,
+      editor.generation?.algorithmVersion ?? 3,
     );
     editor.replace(generated.document, {
       presetId: generated.preset.id,
@@ -1684,60 +1722,69 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="header-actions flex min-w-0 items-center gap-1 overflow-x-auto">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={locale === 'en' ? 'Undo' : '元に戻す'}
-              disabled={!editor.canUndo}
-              onClick={editor.undo}
-            >
-              <Undo2 />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={locale === 'en' ? 'Redo' : 'やり直す'}
-              disabled={!editor.canRedo}
-              onClick={editor.redo}
-            >
-              <Redo2 />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={
-                locale === 'en' ? 'Save as preset' : '設定をプリセット保存'
-              }
-              onClick={saveUserPreset}
-            >
-              <Save />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={
-                locale === 'en' ? 'Share reproducible URL' : '再現URLを共有'
-              }
-              onClick={copyShareUrl}
-            >
-              <Share2 />
-            </Button>
-            <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
-            <ProjectManagerDialog
-              snapshot={editor.snapshot}
+          <div className="ml-2 flex min-w-0 flex-1 items-center justify-end gap-1">
+            <div className="header-actions flex min-w-0 items-center gap-1 overflow-x-auto">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={locale === 'en' ? 'Undo' : '元に戻す'}
+                disabled={!editor.canUndo}
+                onClick={editor.undo}
+              >
+                <Undo2 />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={locale === 'en' ? 'Redo' : 'やり直す'}
+                disabled={!editor.canRedo}
+                onClick={editor.redo}
+              >
+                <Redo2 />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={
+                  locale === 'en' ? 'Save as preset' : '設定をプリセット保存'
+                }
+                onClick={saveUserPreset}
+              >
+                <Save />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={
+                  locale === 'en' ? 'Share reproducible URL' : '再現URLを共有'
+                }
+                onClick={copyShareUrl}
+              >
+                <Share2 />
+              </Button>
+              <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
+              <ProjectManagerDialog
+                snapshot={editor.snapshot}
+                locale={locale}
+                cloudEnabled={CLOUD_FEATURES_ENABLED}
+                onLoad={loadSnapshot}
+                onNotice={flash}
+              />
+              <DisplaySettingsDialog
+                value={displayPreferences}
+                onChange={updateDisplay}
+              />
+              <ExportDialog
+                document={currentDocument}
+                name={activePresetName}
+                locale={locale}
+              />
+            </div>
+            <HeaderUtilityControls
               locale={locale}
-              onLoad={loadSnapshot}
-              onNotice={flash}
-            />
-            <DisplaySettingsDialog
-              value={displayPreferences}
-              onChange={updateDisplay}
-            />
-            <ExportDialog
-              document={currentDocument}
-              name={activePresetName}
-              locale={locale}
+              darkMode={darkMode}
+              cloudEnabled={CLOUD_FEATURES_ENABLED}
+              onDarkModeChange={(value) => updateDisplay({ darkMode: value })}
             />
           </div>
         </header>
@@ -1927,7 +1974,7 @@ export default function Home() {
                         {locale === 'en' ? 'Details' : '詳細'}
                       </h2>
                       <span className="max-w-32 truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground">
-                        {activeLayer.name}
+                        {activeLayerName}
                       </span>
                     </div>
                     <div className="space-y-3">
@@ -2506,7 +2553,7 @@ export default function Home() {
                           onClick={() => editor.setActiveLayerId(layer.id)}
                         >
                           <strong className="block truncate text-xs">
-                            {layer.name}
+                            {patternLayerDisplayName(layer.name, locale)}
                           </strong>
                           <span className="text-[9px] text-muted-foreground">
                             {locale === 'en'
@@ -2531,8 +2578,8 @@ export default function Home() {
                           variant="ghost"
                           aria-label={
                             locale === 'en'
-                              ? `${layer.visible ? 'Hide' : 'Show'} ${layer.name}`
-                              : `${layer.name}を${layer.visible ? '非表示' : '表示'}`
+                              ? `${layer.visible ? 'Hide' : 'Show'} ${patternLayerDisplayName(layer.name, locale)}`
+                              : `${patternLayerDisplayName(layer.name, locale)}を${layer.visible ? '非表示' : '表示'}`
                           }
                           onClick={() =>
                             editor.patchLayer(layer.id, {
@@ -2551,8 +2598,8 @@ export default function Home() {
                       variant="outline"
                       aria-label={
                         locale === 'en'
-                          ? `Duplicate ${activeLayer.name}`
-                          : `${activeLayer.name}を複製`
+                          ? `Duplicate ${activeLayerName}`
+                          : `${activeLayerName}を複製`
                       }
                       disabled={currentDocument.layers.length >= 5}
                       onClick={() => editor.duplicateLayer(activeLayer.id)}
@@ -2564,8 +2611,8 @@ export default function Home() {
                       variant="outline"
                       aria-label={
                         locale === 'en'
-                          ? `Move ${activeLayer.name} up`
-                          : `${activeLayer.name}を上へ`
+                          ? `Move ${activeLayerName} up`
+                          : `${activeLayerName}を上へ`
                       }
                       onClick={() => editor.moveLayer(activeLayer.id, 1)}
                     >
@@ -2576,8 +2623,8 @@ export default function Home() {
                       variant="outline"
                       aria-label={
                         locale === 'en'
-                          ? `Move ${activeLayer.name} down`
-                          : `${activeLayer.name}を下へ`
+                          ? `Move ${activeLayerName} down`
+                          : `${activeLayerName}を下へ`
                       }
                       onClick={() => editor.moveLayer(activeLayer.id, -1)}
                     >
@@ -2588,8 +2635,8 @@ export default function Home() {
                       variant="outline"
                       aria-label={
                         locale === 'en'
-                          ? `Toggle ${activeLayer.name}`
-                          : `${activeLayer.name}の表示を切り替え`
+                          ? `Toggle ${activeLayerName}`
+                          : `${activeLayerName}の表示を切り替え`
                       }
                       onClick={() =>
                         editor.patchLayer(activeLayer.id, {
@@ -2604,8 +2651,8 @@ export default function Home() {
                       variant="destructive"
                       aria-label={
                         locale === 'en'
-                          ? `Delete ${activeLayer.name}`
-                          : `${activeLayer.name}を削除`
+                          ? `Delete ${activeLayerName}`
+                          : `${activeLayerName}を削除`
                       }
                       disabled={currentDocument.layers.length <= 1}
                       onClick={() => editor.removeLayer(activeLayer.id)}

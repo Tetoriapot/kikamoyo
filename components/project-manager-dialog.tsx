@@ -59,11 +59,13 @@ export function ProjectManagerDialog({
   locale,
   onLoad,
   onNotice,
+  cloudEnabled = process.env.NEXT_PUBLIC_CLOUD_ENABLED !== 'false',
 }: {
   snapshot: EditorSnapshot;
   locale: Locale;
   onLoad: (snapshot: EditorSnapshot, name: string) => void;
   onNotice: (message: string) => void;
+  cloudEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(snapshot.presetName);
@@ -104,7 +106,7 @@ export function ProjectManagerDialog({
     const timer = window.setTimeout(() => {
       setProjects(readLocalProjects());
       setName(snapshot.presetName);
-      void refreshCloud();
+      if (cloudEnabled) void refreshCloud();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -287,9 +289,13 @@ export function ProjectManagerDialog({
             {en ? 'Projects & versions' : 'プロジェクトと版管理'}
           </DialogTitle>
           <DialogDescription>
-            {en
-              ? 'Keep named versions on this device, import/export JSON, or sync privately.'
-              : '名前付きの版を端末内に保存し、JSON入出力や非公開同期ができます。'}
+            {cloudEnabled
+              ? en
+                ? 'Keep named versions on this device, import/export JSON, or sync privately.'
+                : '名前付きの版を端末内に保存し、JSON入出力や非公開同期ができます。'
+              : en
+                ? 'Keep named versions on this device, or import and export JSON.'
+                : '名前付きの版を端末内に保存し、JSONで入出力できます。'}
           </DialogDescription>
         </DialogHeader>
         <section className="space-y-3 rounded-xl border p-3">
@@ -423,82 +429,86 @@ export function ProjectManagerDialog({
             </p>
           )}
         </section>
-        <section className="space-y-3 rounded-xl border p-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2">
-              <Cloud className="size-4" />
-              <h3 className="font-semibold">
-                {en ? 'Private cloud' : '非公開クラウド'}
-              </h3>
-            </span>
-            <span className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={shareCloud}
-                disabled={busy}
-              >
-                <Share2 />
-                {en ? 'Share copy' : '共有コピー'}
-              </Button>
-              <Button size="sm" onClick={createCloud} disabled={busy}>
-                <Cloud />
-                {en ? 'Save new' : '新規保存'}
-              </Button>
-            </span>
-          </div>
-          <p className="ui-help text-muted-foreground">
-            {en
-              ? 'Only signed-in people allowed to this private site can open a shared link.'
-              : '共有リンクも、この非公開サイトへのアクセス権がある相手だけが開けます。'}
-          </p>
-          {cloudMessage && (
-            <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-              {cloudMessage}
-            </p>
-          )}
-          <div className="space-y-2">
-            {cloud.map((project) => (
-              <div
-                key={project.id}
-                className="flex items-center gap-2 rounded-xl border p-2"
-              >
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 text-left"
-                  onClick={() => {
-                    onLoad(project.snapshot, project.name);
-                    setOpen(false);
-                  }}
-                >
-                  <strong className="block truncate text-sm">
-                    {project.name}
-                  </strong>
-                  <span className="ui-help text-muted-foreground">
-                    v{project.revision} ·{' '}
-                    {readableDate(project.updatedAt, locale)}
-                  </span>
-                </button>
+        {cloudEnabled && (
+          <section className="space-y-3 rounded-xl border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <Cloud className="size-4" />
+                <h3 className="font-semibold">
+                  {en ? 'Private cloud' : '非公開クラウド'}
+                </h3>
+              </span>
+              <span className="flex gap-2">
                 <Button
                   size="sm"
                   variant="outline"
+                  onClick={shareCloud}
                   disabled={busy}
-                  onClick={() => void syncCloud(project)}
                 >
-                  {en ? 'Sync' : '同期'}
+                  <Share2 />
+                  {en ? 'Share copy' : '共有コピー'}
                 </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={en ? 'Delete cloud project' : 'クラウドから削除'}
-                  onClick={() => void deleteCloud(project)}
+                <Button size="sm" onClick={createCloud} disabled={busy}>
+                  <Cloud />
+                  {en ? 'Save new' : '新規保存'}
+                </Button>
+              </span>
+            </div>
+            <p className="ui-help text-muted-foreground">
+              {en
+                ? 'Only signed-in people allowed to this private site can open a shared link.'
+                : '共有リンクも、この非公開サイトへのアクセス権がある相手だけが開けます。'}
+            </p>
+            {cloudMessage && (
+              <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+                {cloudMessage}
+              </p>
+            )}
+            <div className="space-y-2">
+              {cloud.map((project) => (
+                <div
+                  key={project.id}
+                  className="flex items-center gap-2 rounded-xl border p-2"
                 >
-                  <Trash2 />
-                </Button>
-              </div>
-            ))}
-          </div>
-        </section>
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => {
+                      onLoad(project.snapshot, project.name);
+                      setOpen(false);
+                    }}
+                  >
+                    <strong className="block truncate text-sm">
+                      {project.name}
+                    </strong>
+                    <span className="ui-help text-muted-foreground">
+                      v{project.revision} ·{' '}
+                      {readableDate(project.updatedAt, locale)}
+                    </span>
+                  </button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void syncCloud(project)}
+                  >
+                    {en ? 'Sync' : '同期'}
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={
+                      en ? 'Delete cloud project' : 'クラウドから削除'
+                    }
+                    onClick={() => void deleteCloud(project)}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </DialogContent>
     </Dialog>
   );
