@@ -1,7 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { INITIAL_PRESET, presetDocument } from '@/data/presets';
+import {
+  INITIAL_PRESET,
+  migrateUnmodifiedBuiltInPresetDocument,
+  presetDocument,
+} from '@/data/presets';
 import type {
   CanvasConfig, EditorDocument, EditorSnapshot, OmakaseGeneration, PatternConfig, PatternLayer,
 } from '@/lib/pattern-types';
@@ -75,7 +79,20 @@ export function usePatternEditor() {
           const saved = window.localStorage.getItem('lastSession');
           if (saved) {
             restored = parseEditorSnapshot(JSON.parse(saved) as unknown);
-            if (restored && status !== 'invalid-shared') status = 'session';
+            if (restored) {
+              const migrated = migrateUnmodifiedBuiltInPresetDocument(
+                restored.presetId,
+                restored.document,
+              );
+              if (migrated) {
+                restored = {
+                  ...restored,
+                  document: migrated,
+                  activeLayerId: migrated.layers[0]?.id ?? null,
+                };
+              }
+              if (status !== 'invalid-shared') status = 'session';
+            }
             if (!restored) window.localStorage.removeItem('lastSession');
           }
         } catch {

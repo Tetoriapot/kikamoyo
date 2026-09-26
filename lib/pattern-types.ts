@@ -163,7 +163,7 @@ export interface EditorDocument {
 export interface OmakaseGeneration {
   kind: 'omakase';
   category: string;
-  algorithmVersion: 1 | 2 | 3;
+  algorithmVersion: 1 | 2 | 3 | 4;
 }
 
 export interface EditorSnapshot {
@@ -383,7 +383,7 @@ export function isEditorSnapshot(value: unknown): value is EditorSnapshot {
       value.generation.kind !== 'omakase' ||
       typeof value.generation.category !== 'string' ||
       value.generation.category.length > 64 ||
-      ![1, 2, 3].includes(value.generation.algorithmVersion as number)
+      ![1, 2, 3, 4].includes(value.generation.algorithmVersion as number)
     )
       return false;
   }

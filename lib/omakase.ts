@@ -3,6 +3,7 @@ import {
   LEGACY_ALL_PRESETS,
   LEGACY_PRESETS,
   PRESETS,
+  V3_ALL_PRESETS,
   presetDocument,
 } from '@/data/presets';
 import { hashUnit } from '@/lib/seed';
@@ -49,7 +50,7 @@ export function normalizeOmakaseSeed(seed: number) {
 export function generateOmakase(
   seedInput: number,
   categoryInput: string,
-  algorithmVersion: OmakaseGeneration['algorithmVersion'] = 3,
+  algorithmVersion: OmakaseGeneration['algorithmVersion'] = 4,
 ): OmakaseResult {
   const seed = normalizeOmakaseSeed(seedInput);
   const category = OMAKASE_CATEGORIES.some(([value]) => value === categoryInput)
@@ -60,7 +61,9 @@ export function generateOmakase(
       ? LEGACY_PRESETS
       : algorithmVersion === 2
         ? LEGACY_ALL_PRESETS
-        : ALL_PRESETS;
+        : algorithmVersion === 3
+          ? V3_ALL_PRESETS
+          : ALL_PRESETS;
   const filtered =
     category === 'all'
       ? source

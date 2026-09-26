@@ -384,7 +384,7 @@ function parseRandomHistory(value: unknown): RandomHistoryEntry[] {
       'category' in item.generation &&
       typeof item.generation.category === 'string' &&
       'algorithmVersion' in item.generation &&
-      [1, 2, 3].includes(Number(item.generation.algorithmVersion))
+      [1, 2, 3, 4].includes(Number(item.generation.algorithmVersion))
         ? (item.generation as OmakaseGeneration)
         : undefined;
     entries.push({
@@ -1410,7 +1410,7 @@ export default function Home() {
     const generated = generateOmakase(
       currentDocument.seed,
       category,
-      editor.generation?.algorithmVersion ?? 3,
+      editor.generation?.algorithmVersion ?? 4,
     );
     editor.replace(generated.document, {
       presetId: generated.preset.id,
@@ -2527,7 +2527,10 @@ export default function Home() {
                         {locale === 'en' ? 'Layers' : 'レイヤー'}
                       </h2>
                       <p className="mt-1 text-[10px] text-muted-foreground">
-                        {currentDocument.layers.length} / 5
+                        {currentDocument.layers.length} / 5 ·{' '}
+                        {locale === 'en'
+                          ? 'add only when needed'
+                          : '必要なときだけ追加'}
                       </p>
                     </div>
                     <Button

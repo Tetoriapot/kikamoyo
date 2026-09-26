@@ -24,7 +24,7 @@ const COPY = {
     changes: [
       'ヘッダーからライトモードとダークモードを切り替えられるようになりました。',
       '更新情報とヘルプをいつでも確認できるようになりました。',
-      'プリセットとパターンの表示を、より迷いにくく整理しました。',
+      'プリセットは1レイヤーを基本にし、必要なデザインだけ複数レイヤーを使うようにしました。',
     ],
     darkMode: 'ダークモード',
     lightMode: 'ライトモード',
@@ -34,7 +34,7 @@ const COPY = {
     helpDescription: '模様を作って保存するまでの基本操作です。',
     helpSteps: [
       '「見本」から、好みの模様を選びます。',
-      '色・かたち・配置を調整して、プレビューで仕上がりを確認します。',
+      '色・かたち・配置を調整し、必要なときだけレイヤーを追加します。',
       '右上の「書き出し」から、必要な形式で保存します。',
     ],
     keyboardHeading: 'キーボードでの操作',
@@ -55,7 +55,7 @@ const COPY = {
     changes: [
       'You can now switch between light and dark mode from the header.',
       'Updates and Help are now available whenever you need them.',
-      'Preset and pattern views have been reorganized for easier navigation.',
+      'Presets now use one layer by default, with extra layers reserved for designs that need them.',
     ],
     darkMode: 'Dark mode',
     lightMode: 'Light mode',
@@ -65,7 +65,7 @@ const COPY = {
     helpDescription: 'The basics of creating and saving a pattern.',
     helpSteps: [
       'Choose a pattern you like from Presets.',
-      'Adjust its colors, shapes, and layout, then check the preview.',
+      'Adjust colors, shapes, and layout, adding another layer only when needed.',
       'Use Export in the upper-right corner to save it in the format you need.',
     ],
     keyboardHeading: 'Keyboard controls',

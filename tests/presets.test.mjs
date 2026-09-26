@@ -31,22 +31,37 @@ after(async () => {
   await server?.close();
 });
 
-void test('the current preset corpus is neutral while frozen legacy corpora remain available', () => {
+void test('current presets default to one layer while historical corpora remain frozen', () => {
   const {
     ALL_PRESETS,
     LEGACY_ALL_PRESETS,
     LEGACY_PRESETS,
     PRESETS,
     STYLE_PRESETS,
+    V3_ALL_PRESETS,
+    V3_PRESETS,
   } = presetModule;
   assert.equal(PRESETS.length, 100);
   assert.equal(new Set(PRESETS.map((preset) => preset.id)).size, 100);
-  assert.ok(PRESETS.every((preset) => preset.document.layers.length === 3));
+  assert.ok(PRESETS.every((preset) => preset.document.layers.length === 1));
   assert.ok(PRESETS.every((preset) => preset.document.canvas.seamless));
   assert.equal(LEGACY_PRESETS.length, 100);
+  assert.equal(V3_PRESETS.length, 100);
+  assert.ok(V3_PRESETS.every((preset) => preset.document.layers.length === 3));
   assert.equal(STYLE_PRESETS.length, 17);
+  assert.deepEqual(
+    STYLE_PRESETS.filter((preset) => preset.document.layers.length > 1).map(
+      (preset) => preset.name,
+    ),
+    ['デュオフラワー'],
+  );
   assert.equal(ALL_PRESETS.length, 117);
   assert.equal(LEGACY_ALL_PRESETS.length, 117);
+  assert.equal(V3_ALL_PRESETS.length, 117);
+  assert.equal(
+    ALL_PRESETS.filter((preset) => preset.document.layers.length === 1).length,
+    116,
+  );
   assert.equal(
     new Set(ALL_PRESETS.map((preset) => preset.id)).size,
     ALL_PRESETS.length,
@@ -66,21 +81,30 @@ void test('the current preset corpus is neutral while frozen legacy corpora rema
   assert.ok(currentLayers.every((layer) => !forbiddenName.test(layer.name)));
   assert.ok(currentLayers.every((layer) => !forbiddenId.test(layer.id)));
   assert.ok(
-    PRESETS.every(
+    V3_PRESETS.every(
       (preset) => preset.document.layers[1].id === `${preset.id}-layer-2`,
     ),
   );
   assert.ok(
-    PRESETS.every(
+    V3_PRESETS.every(
       (preset) => preset.document.layers[2].id === `${preset.id}-layer-3`,
     ),
   );
   assert.ok(
-    PRESETS.every((preset) => preset.document.layers[1].name === 'レイヤー 2'),
+    V3_PRESETS.every(
+      (preset) => preset.document.layers[1].name === 'レイヤー 2',
+    ),
   );
   assert.ok(
-    PRESETS.every((preset) => preset.document.layers[2].name === 'レイヤー 3'),
+    V3_PRESETS.every(
+      (preset) => preset.document.layers[2].name === 'レイヤー 3',
+    ),
   );
+
+  const memphis = PRESETS.find((preset) => preset.name === '80sメンフィス');
+  assert.equal(memphis.document.layers.length, 1);
+  assert.equal(memphis.document.layers[0].type, 'geoCollage');
+  assert.equal(memphis.document.layers[0].config.placement, 'random');
 });
 
 void test('the complete shape and placement registries are available', () => {
@@ -146,6 +170,38 @@ void test('the same seed and channel always reproduce the same jitter', () => {
 
 void test('the first launch is the intended Memphis sample', () => {
   assert.equal(presetModule.INITIAL_PRESET.name, '80sメンフィス');
+  assert.equal(presetModule.INITIAL_PRESET.document.layers.length, 1);
+  assert.equal(
+    presetModule.INITIAL_PRESET.document.layers[0].type,
+    'geoCollage',
+  );
+});
+
+void test('only exact untouched legacy and v3 presets are migrated', () => {
+  const id = 'retro-072';
+  const current = presetModule.PRESETS.find((preset) => preset.id === id);
+  const legacy = presetModule.LEGACY_PRESETS.find((preset) => preset.id === id);
+  const v3 = presetModule.V3_PRESETS.find((preset) => preset.id === id);
+
+  assert.deepEqual(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(id, legacy.document),
+    current.document,
+  );
+  assert.deepEqual(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(id, v3.document),
+    current.document,
+  );
+
+  const edited = structuredClone(v3.document);
+  edited.layers[0].config.size += 1;
+  assert.equal(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(id, edited),
+    null,
+  );
+  assert.equal(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(null, v3.document),
+    null,
+  );
 });
 
 void test('editor documents and legacy snapshots are validated deeply', () => {
@@ -161,7 +217,7 @@ void test('editor documents and legacy snapshots are validated deeply', () => {
   assert.equal(typeModule.isEditorDocument(noLayers), false);
 
   const duplicateLayer = typeModule.cloneDocument(valid);
-  duplicateLayer.layers[1].id = duplicateLayer.layers[0].id;
+  duplicateLayer.layers.push(structuredClone(duplicateLayer.layers[0]));
   assert.equal(typeModule.isEditorDocument(duplicateLayer), false);
 
   const unknownPlacement = typeModule.cloneDocument(valid);
@@ -172,14 +228,21 @@ void test('editor documents and legacy snapshots are validated deeply', () => {
     sessionVersion: 1,
     document: valid,
     presetId: null,
-    presetName: 'v3 generation',
+    presetName: 'v4 generation',
     activeLayerId: valid.layers[0].id,
-    generation: { kind: 'omakase', category: 'all', algorithmVersion: 3 },
+    generation: { kind: 'omakase', category: 'all', algorithmVersion: 4 },
   };
   assert.equal(typeModule.isEditorSnapshot(currentGeneration), true);
+  assert.equal(
+    typeModule.isEditorSnapshot({
+      ...currentGeneration,
+      generation: { ...currentGeneration.generation, algorithmVersion: 5 },
+    }),
+    false,
+  );
 });
 
-void test('omakase v1 and v2 remain byte-stable while v3 uses the current corpus', () => {
+void test('omakase v1 through v3 remain byte-stable while v4 uses one-layer presets', () => {
   const legacy = omakaseModule.generateOmakase(472981, 'all', 1);
   assert.equal(legacy.preset.id, 'circle-032');
   assert.equal(legacy.preset.name, 'バブル');
@@ -209,11 +272,22 @@ void test('omakase v1 and v2 remain byte-stable while v3 uses the current corpus
     '49763b3f703562ec4072cb08f2f2240281170d2bc439ece83231038b2aaf9901',
   );
 
+  const legacyV3 = omakaseModule.generateOmakase(472981, 'all', 3);
+  assert.equal(legacyV3.preset.id, 'line-020');
+  assert.equal(legacyV3.generation.algorithmVersion, 3);
+  assert.equal(
+    createHash('sha256')
+      .update(JSON.stringify(legacyV3.document))
+      .digest('hex'),
+    '86792036e74acf7eafbf96e670d2444e04fcb39523a53570a134ab76deb0ca8f',
+  );
+
   const first = omakaseModule.generateOmakase(472981, 'all');
   const second = omakaseModule.generateOmakase(472981, 'all');
   assert.deepEqual(first, second);
-  assert.equal(first.generation.algorithmVersion, 3);
+  assert.equal(first.generation.algorithmVersion, 4);
   assert.equal(first.document.seed, 472981);
+  assert.equal(first.document.layers.length, 1);
   assert.notDeepEqual(
     first.document,
     omakaseModule.generateOmakase(472982, 'all').document,
