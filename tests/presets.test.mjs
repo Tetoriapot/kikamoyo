@@ -198,8 +198,13 @@ void test('untouched legacy and v3 presets migrate while edited secondaries stay
     presetModule.migrateUnmodifiedBuiltInPresetDocument(id, edited),
     null,
   );
+  const anonymousVisible = structuredClone(v3.document);
+  anonymousVisible.layers[1].visible = true;
   assert.equal(
-    presetModule.migrateUnmodifiedBuiltInPresetDocument(null, v3.document),
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(
+      null,
+      anonymousVisible,
+    ),
     null,
   );
 });
@@ -222,6 +227,17 @@ void test('automatic secondary layers are removed while a customized primary is 
     expected.layers = [expected.layers[0]];
     assert.deepEqual(
       presetModule.migrateUnmodifiedBuiltInPresetDocument(id, hybrid),
+      expected,
+    );
+    assert.deepEqual(
+      presetModule.migrateUnmodifiedBuiltInPresetDocument(null, hybrid),
+      expected,
+    );
+    assert.deepEqual(
+      presetModule.migrateUnmodifiedBuiltInPresetDocument(
+        'random-history-0',
+        hybrid,
+      ),
       expected,
     );
   }

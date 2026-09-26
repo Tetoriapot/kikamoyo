@@ -1235,15 +1235,18 @@ export function migrateUnmodifiedBuiltInPresetDocument(
   document: EditorDocument,
   activeLayerId: string | null = document.layers[0]?.id ?? null,
 ): EditorDocument | null {
-  if (!presetId) return null;
   if (activeLayerId && activeLayerId !== document.layers[0]?.id) return null;
-  const current = PRESETS.find((preset) => preset.id === presetId);
-  if (!current) return null;
-  const historical = [LEGACY_PRESETS, V3_PRESETS]
-    .map((corpus) => corpus.find((preset) => preset.id === presetId))
-    .filter((preset): preset is PatternPreset => Boolean(preset));
+  const current = presetId
+    ? PRESETS.find((preset) => preset.id === presetId)
+    : undefined;
+  const historical = current
+    ? [LEGACY_PRESETS, V3_PRESETS]
+        .map((corpus) => corpus.find((preset) => preset.id === presetId))
+        .filter((preset): preset is PatternPreset => Boolean(preset))
+    : [...LEGACY_PRESETS, ...V3_PRESETS];
   const signature = JSON.stringify(document);
   if (
+    current &&
     historical.some((preset) => JSON.stringify(preset.document) === signature)
   )
     return cloneDocument(current.document);
