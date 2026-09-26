@@ -1226,14 +1226,17 @@ export const V3_ALL_PRESETS: PatternPreset[] = [
 export const ALL_PRESETS: PatternPreset[] = [...STYLE_PRESETS, ...PRESETS];
 
 /**
- * Upgrade only untouched built-in documents from the legacy or v3 corpus.
- * Edited documents deliberately fail the exact comparison and are preserved.
+ * Upgrade untouched built-in documents from the legacy or v3 corpus.
+ * For edited sessions, remove only hidden, unchanged generated secondary layers;
+ * visible, active, edited, and manually added layers are preserved.
  */
 export function migrateUnmodifiedBuiltInPresetDocument(
   presetId: string | null,
   document: EditorDocument,
+  activeLayerId: string | null = document.layers[0]?.id ?? null,
 ): EditorDocument | null {
   if (!presetId) return null;
+  if (activeLayerId && activeLayerId !== document.layers[0]?.id) return null;
   const current = PRESETS.find((preset) => preset.id === presetId);
   if (!current) return null;
   const historical = [LEGACY_PRESETS, V3_PRESETS]
@@ -1251,6 +1254,7 @@ export function migrateUnmodifiedBuiltInPresetDocument(
     return document.layers.slice(1).every((candidate, index) => {
       const generated = preset.document.layers[index + 1];
       return (
+        !candidate.visible &&
         generated !== undefined &&
         JSON.stringify({ ...candidate, visible: generated.visible }) ===
           JSON.stringify(generated)

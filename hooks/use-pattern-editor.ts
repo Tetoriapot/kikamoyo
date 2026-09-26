@@ -83,6 +83,7 @@ export function usePatternEditor() {
               const migrated = migrateUnmodifiedBuiltInPresetDocument(
                 restored.presetId,
                 restored.document,
+                restored.activeLayerId,
               );
               if (migrated) {
                 restored = {

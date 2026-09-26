@@ -177,7 +177,7 @@ void test('the first launch is the intended Memphis sample', () => {
   );
 });
 
-void test('only exact untouched legacy and v3 presets are migrated', () => {
+void test('untouched legacy and v3 presets migrate while edited secondaries stay intact', () => {
   const id = 'retro-072';
   const current = presetModule.PRESETS.find((preset) => preset.id === id);
   const legacy = presetModule.LEGACY_PRESETS.find((preset) => preset.id === id);
@@ -216,7 +216,7 @@ void test('automatic secondary layers are removed while a customized primary is 
     hybrid.layers[0].type = 'geoCollage';
     hybrid.layers[0].config.placement = 'random';
     hybrid.layers[0].config.size += 7;
-    for (const layer of hybrid.layers.slice(1)) layer.visible = !layer.visible;
+    for (const layer of hybrid.layers.slice(1)) layer.visible = false;
 
     const expected = structuredClone(hybrid);
     expected.layers = [expected.layers[0]];
@@ -225,6 +225,36 @@ void test('automatic secondary layers are removed while a customized primary is 
       expected,
     );
   }
+});
+
+void test('visible or active secondary layers are preserved as intentional work', () => {
+  const id = 'retro-072';
+  const original = presetModule.V3_PRESETS.find(
+    (preset) => preset.id === id,
+  ).document;
+
+  const visibleSecondary = structuredClone(original);
+  visibleSecondary.layers[0].config.size += 7;
+  visibleSecondary.layers[1].visible = true;
+  assert.equal(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(
+      id,
+      visibleSecondary,
+    ),
+    null,
+  );
+
+  const activeSecondary = structuredClone(original);
+  activeSecondary.layers[0].config.size += 7;
+  for (const layer of activeSecondary.layers.slice(1)) layer.visible = false;
+  assert.equal(
+    presetModule.migrateUnmodifiedBuiltInPresetDocument(
+      id,
+      activeSecondary,
+      activeSecondary.layers[1].id,
+    ),
+    null,
+  );
 });
 
 void test('edited secondary layers and manually added layers are never removed', () => {
