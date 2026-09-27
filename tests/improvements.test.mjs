@@ -46,6 +46,76 @@ before(async () => {
 
 after(async () => server?.close());
 
+void test('legacy export JSON is editable and malformed files are rejected', () => {
+  const document = types.cloneDocument(presets.INITIAL_PRESET.document);
+  const imported = projectCodec.decodeProjectFile(
+    JSON.stringify({
+      format: 'kikamoyo',
+      version: 1,
+      name: 'legacy',
+      document,
+    }),
+  );
+  assert.deepEqual(imported.versions[0].snapshot.document, document);
+  assert.throws(() =>
+    projectCodec.decodeProjectFile(
+      JSON.stringify({ format: 'kikamoyo', version: 1, document: {} }),
+    ),
+  );
+  assert.throws(() =>
+    projectCodec.decodeProjectFile(
+      ' '.repeat(projectCodec.MAX_PROJECT_BYTES + 1),
+    ),
+  );
+});
+
+void test('project and version limits never evict existing work; storage failures leave data intact', () => {
+  const data = new Map();
+  let fail = false;
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => data.get(key) ?? null,
+      setItem: (key, value) => {
+        if (fail) throw new Error('QuotaExceededError');
+        data.set(key, value);
+      },
+    },
+  };
+  try {
+    const snapshot = types.parseEditorSnapshot(presets.INITIAL_PRESET.document);
+    const project = projectCodec.createLocalProject('Kept', snapshot);
+    const projects = Array.from({ length: 20 }, () =>
+      projectCodec.createLocalProject('Kept', snapshot),
+    );
+    projectCodec.writeProjectLibrary({ projects, trash: [] });
+    assert.throws(() =>
+      projectCodec.writeLocalProjects([project, ...projects]),
+    );
+    assert.deepEqual(projectCodec.readLocalProjects(), projects);
+    let versions = project;
+    for (let index = 1; index < 20; index++)
+      versions = projectCodec.addProjectVersion(versions, snapshot);
+    assert.throws(() => projectCodec.addProjectVersion(versions, snapshot));
+    assert.equal(versions.versions.length, 20);
+    fail = true;
+    assert.throws(() => projectCodec.writeLocalProjects([]));
+    assert.deepEqual(projectCodec.readLocalProjects(), projects);
+    fail = false;
+    projectCodec.writeProjectLibrary({
+      projects: projects.slice(1),
+      trash: [projects[0]],
+    });
+    assert.deepEqual(projectCodec.readProjectLibrary().trash, [projects[0]]);
+    projectCodec.writeProjectLibrary({ projects, trash: [] });
+    assert.deepEqual(projectCodec.readLocalProjects(), projects);
+    data.set('kikamoyo.library.v2', '{bad');
+    assert.throws(() => projectCodec.readProjectLibrary());
+    assert.equal(data.get('kikamoyo.library.v2'), '{bad');
+  } finally {
+    delete globalThis.window;
+  }
+});
+
 void test('repeat plans expose stable fundamental cells', () => {
   assert.deepEqual(repeat.getRepeatPlan('straight', 256), {
     width: 256,

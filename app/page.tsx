@@ -51,7 +51,15 @@ import { ProjectManagerDialog } from '@/components/project-manager-dialog';
 import { RandomLockControls } from '@/components/random-lock-controls';
 import { SafeAreaOverlay } from '@/components/safe-area-overlay';
 import { SimpleEditorPanel } from '@/components/simple-editor-panel';
+import { StudioToolsDialog } from '@/components/studio-tools-dialog';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -74,7 +82,7 @@ import {
 import { PURPOSE_PRESETS, purposePreset } from '@/data/purpose-presets';
 import { usePatternEditor } from '@/hooks/use-pattern-editor';
 import { encodeShareState } from '@/lib/export-pattern';
-import { t, type Locale } from '@/lib/i18n';
+import { t, repeatLabel, type Locale } from '@/lib/i18n';
 import {
   generateOmakase,
   inferLegacyOmakaseGeneration,
@@ -727,7 +735,7 @@ function PresetBrowser({
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-bold">{en ? 'Presets' : 'プリセット'}</h2>
+          <h2 className="text-sm font-bold">{en ? 'Presets' : '見本'}</h2>
           <p className="text-[10px] text-muted-foreground">
             {en
               ? `${presets.length} of ${totalCount}`
@@ -747,7 +755,7 @@ function PresetBrowser({
       <div className="relative mb-3">
         <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
         <Input
-          aria-label={en ? 'Search presets' : 'プリセットを検索'}
+          aria-label={en ? 'Search presets' : '見本を検索'}
           className="pl-8"
           placeholder={en ? 'Search names and features' : '名前・特徴で検索'}
           value={search}
@@ -840,7 +848,7 @@ function PresetBrowser({
           <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-border bg-muted/35 p-5 text-center text-xs text-muted-foreground">
             {en
               ? 'No presets match these filters.'
-              : '条件に合うプリセットがありません。'}
+              : '条件に合う見本がありません。'}
             <br />
             {en
               ? 'Try another search or category.'
@@ -875,6 +883,7 @@ export default function Home() {
   const [zoom, setZoom] = useState(1);
   const [randomCategory, setRandomCategory] = useState('all');
   const [notice, setNotice] = useState('');
+  const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
   const cloudShareLoaded = useRef(false);
   const isMobileLayout = useMediaQuery('(max-width: 720px)');
@@ -1499,8 +1508,8 @@ export default function Home() {
       await navigator.clipboard.writeText(url.toString());
       flash(
         locale === 'en'
-          ? 'Copied a reproducible URL. Only allowed viewers can open it.'
-          : '再現URLをコピーしました（アクセス権のある相手のみ開けます）',
+          ? 'Copied a reproducible URL. Anyone with this URL can open the artwork.'
+          : '再現URLをコピーしました。このURLを知る人は模様を開けます。',
       );
     } catch {
       flash(
@@ -1653,7 +1662,7 @@ export default function Home() {
             id="pattern-canvas"
             document={currentDocument}
             tilePreview={effectiveTilePreview}
-            maxObjects={2400}
+            maxObjects={5000}
             className="h-full w-full"
             label={t(locale, 'generated')}
             description={patternDescription}
@@ -1689,6 +1698,49 @@ export default function Home() {
 
   return (
     <div className={darkMode ? 'dark' : ''} data-text-size={textSize}>
+      <Dialog open={presetDialogOpen} onOpenChange={setPresetDialogOpen}>
+        <DialogContent
+          closeLabel={locale === 'en' ? 'Close' : '閉じる'}
+          className="max-w-[min(680px,calc(100vw-1rem))] h-[min(800px,90dvh)] flex flex-col overflow-hidden"
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {locale === 'en' ? 'Choose a preset' : '見本を選ぶ'}
+            </DialogTitle>
+            <DialogDescription>
+              {locale === 'en'
+                ? 'Start with one layer, then adjust colors and shapes.'
+                : '基本は1レイヤー。見本を選んで色や形を調整します。'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1">
+            <PresetBrowser
+              presets={filteredPresets}
+              totalCount={allPresets.length}
+              activeId={activePresetId}
+              favorites={favorites}
+              category={category}
+              search={search}
+              favoriteOnly={favoriteOnly}
+              recentIds={recentIds}
+              recentRandom={recentRandom}
+              onCategory={setCategory}
+              onSearch={setSearch}
+              onFavoriteOnly={() => setFavoriteOnly((value) => !value)}
+              onLoad={(preset) => {
+                loadPreset(preset);
+                setPresetDialogOpen(false);
+              }}
+              onLoadRandom={(entry, index) => {
+                loadRandomHistory(entry, index);
+                setPresetDialogOpen(false);
+              }}
+              onFavorite={toggleFavorite}
+              locale={locale}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
       <nav
         className="skip-links"
         aria-label={locale === 'en' ? 'Skip links' : 'ページ内リンク'}
@@ -1774,17 +1826,35 @@ export default function Home() {
                 value={displayPreferences}
                 onChange={updateDisplay}
               />
-              <ExportDialog
-                document={currentDocument}
-                name={activePresetName}
-                locale={locale}
-              />
             </div>
+            <ExportDialog
+              document={currentDocument}
+              name={activePresetName}
+              locale={locale}
+              snapshot={editor.snapshot}
+              recommendedFormat={selectedPurpose?.recommendedFormat}
+            />
             <HeaderUtilityControls
               locale={locale}
               darkMode={darkMode}
               cloudEnabled={CLOUD_FEATURES_ENABLED}
               onDarkModeChange={(value) => updateDisplay({ darkMode: value })}
+              onNavigate={(target) => {
+                if (target === 'presets') setPresetDialogOpen(true);
+                else if (target === 'colors') {
+                  setEditorMode('detail');
+                  setTab('color');
+                  window.setTimeout(
+                    () => document.getElementById('editor-controls')?.focus(),
+                    0,
+                  );
+                } else
+                  document
+                    .getElementById(
+                      target === 'export' ? 'export-action' : 'projects-action',
+                    )
+                    ?.click();
+              }}
             />
           </div>
         </header>
@@ -1815,8 +1885,28 @@ export default function Home() {
                 {t(locale, 'detail')}
               </Button>
             </div>
+            {editor.storageStatus === 'error' && (
+              <p
+                role="alert"
+                className="m-3 rounded-lg border border-destructive p-3 text-sm"
+              >
+                {locale === 'en'
+                  ? 'Browser autosave failed. Export project JSON now to keep your work.'
+                  : '自動保存できません。作品を残すには書き出しから再編集用JSONを保存してください。'}
+              </p>
+            )}
+            <div className="px-4 pt-3">
+              <StudioToolsDialog
+                snapshot={editor.snapshot}
+                locale={locale}
+                onCanvas={editor.patchCanvas}
+                onLoad={loadSnapshot}
+                onPalette={applyPalette}
+              />
+            </div>
             {editorMode === 'simple' ? (
               <SimpleEditorPanel
+                onBrowse={() => setPresetDialogOpen(true)}
                 document={currentDocument}
                 activeLayer={activeLayer}
                 locale={locale}
@@ -1974,7 +2064,9 @@ export default function Home() {
                         {locale === 'en' ? 'Details' : '詳細'}
                       </h2>
                       <span className="max-w-32 truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground">
-                        {activeLayerName}
+                        {locale === 'en'
+                          ? PATTERN_LABELS_EN[activeLayer.type]
+                          : PATTERN_LABELS[activeLayer.type]}
                       </span>
                     </div>
                     <div className="space-y-3">
@@ -1992,7 +2084,11 @@ export default function Home() {
                             className="w-full"
                             aria-label={locale === 'en' ? 'Shape' : '図形'}
                           >
-                            <SelectValue />
+                            <SelectValue>
+                              {locale === 'en'
+                                ? PATTERN_LABELS_EN[activeLayer.type]
+                                : PATTERN_LABELS[activeLayer.type]}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             {PATTERN_TYPES.map((value) => (
@@ -2030,7 +2126,15 @@ export default function Home() {
                               className="w-full"
                               aria-label={locale === 'en' ? 'Layout' : '配置'}
                             >
-                              <SelectValue />
+                              <SelectValue>
+                                {locale === 'en'
+                                  ? PLACEMENT_LABELS_EN[
+                                      activeLayer.config.placement
+                                    ]
+                                  : PLACEMENT_LABELS[
+                                      activeLayer.config.placement
+                                    ]}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               {PLACEMENT_TYPES.map((value) => (
@@ -2724,7 +2828,13 @@ export default function Home() {
                           locale === 'en' ? 'Blend mode' : '描画モード'
                         }
                       >
-                        <SelectValue />
+                        <SelectValue>
+                          {locale === 'en'
+                            ? BLEND_LABELS_EN[activeLayer.blendMode]
+                            : BLEND_MODES.find(
+                                (mode) => mode.value === activeLayer.blendMode,
+                              )?.label}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {BLEND_MODES.map((mode) => (
@@ -2748,12 +2858,22 @@ export default function Home() {
                       value={purposeId ?? ''}
                       onValueChange={(value) => value && applyPurpose(value)}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger
+                        className="w-full"
+                        aria-label={
+                          locale === 'en' ? 'Use preset' : '用途プリセット'
+                        }
+                      >
                         <SelectValue
                           placeholder={
                             locale === 'en' ? 'Choose a use' : '用途を選ぶ'
                           }
-                        />
+                        >
+                          {selectedPurpose?.[
+                            locale === 'en' ? 'labelEn' : 'label'
+                          ] ??
+                            (locale === 'en' ? 'Choose a use' : '用途を選ぶ')}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {PURPOSE_PRESETS.map((item) => (
@@ -2770,6 +2890,9 @@ export default function Home() {
                           : '安全域ガイドを表示'}
                       </span>
                       <Switch
+                        aria-label={
+                          locale === 'en' ? 'Safe-area guide' : '安全域ガイド'
+                        }
                         checked={showSafeArea}
                         onCheckedChange={setShowSafeArea}
                       />
@@ -2897,7 +3020,9 @@ export default function Home() {
                           locale === 'en' ? 'Tile size' : 'タイルサイズ'
                         }
                       >
-                        <SelectValue />
+                        <SelectValue>
+                          {currentDocument.canvas.tileSize} px
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {[128, 256, 512, 1024].map((value) => (
@@ -2922,8 +3047,18 @@ export default function Home() {
                         })
                       }
                     >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
+                      <SelectTrigger
+                        className="w-full"
+                        aria-label={
+                          locale === 'en' ? 'Repeat mode' : 'リピート方式'
+                        }
+                      >
+                        <SelectValue>
+                          {repeatLabel(
+                            currentDocument.canvas.repeatMode ?? 'straight',
+                            locale,
+                          )}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="straight">

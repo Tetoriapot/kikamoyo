@@ -9,9 +9,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { INITIAL_PRESET, PALETTE_OPTIONS, STYLE_PRESETS } from '@/data/presets';
+import { PALETTE_OPTIONS, STYLE_PRESETS } from '@/data/presets';
 import { PURPOSE_PRESETS } from '@/data/purpose-presets';
-import type { Locale } from '@/lib/i18n';
+import { paletteLabel, repeatLabel, type Locale } from '@/lib/i18n';
+import { Button } from '@/components/ui/button';
 import { describePattern } from '@/lib/pattern-summary';
 import { PatternCanvas } from '@/lib/pattern-engine';
 import type {
@@ -34,7 +35,7 @@ const STYLES: Array<{
     type: 'triangles',
     ja: 'リピート',
     en: 'Repeat',
-    sample: INITIAL_PRESET.document,
+    sample: STYLE_PRESETS[5].document,
   },
   {
     type: 'lowPoly',
@@ -106,6 +107,7 @@ export function SimpleEditorPanel({
   onPurpose,
   onSafeArea,
   onLocks,
+  onBrowse,
 }: {
   document: EditorDocument;
   activeLayer: PatternLayer;
@@ -122,10 +124,14 @@ export function SimpleEditorPanel({
   onPurpose: (id: string) => void;
   onSafeArea: (value: boolean) => void;
   onLocks: (value: RandomLocks) => void;
+  onBrowse: () => void;
 }) {
   const en = locale === 'en';
   return (
     <div className="space-y-6 p-4">
+      <Button className="w-full" variant="outline" onClick={onBrowse}>
+        {en ? 'Choose a preset' : '見本を選ぶ'}
+      </Button>
       <section className="space-y-3">
         <div>
           <h2 className="section-label">{en ? 'Style' : 'スタイル'}</h2>
@@ -140,6 +146,16 @@ export function SimpleEditorPanel({
             <button
               key={style.type}
               type="button"
+              aria-pressed={
+                activeLayer.type === style.type ||
+                (style.type === 'triangles' &&
+                  ![
+                    'lowPoly',
+                    'geoCollage',
+                    'glassShards',
+                    'quarterTiles',
+                  ].includes(activeLayer.type))
+              }
               onClick={() => onApplyStyle(style.type)}
               className={`overflow-hidden rounded-xl border text-left ${activeLayer.type === style.type || (style.type === 'triangles' && !['lowPoly', 'geoCollage', 'glassShards', 'quarterTiles'].includes(activeLayer.type)) ? 'border-primary ring-2 ring-primary/15' : 'border-input'}`}
             >
@@ -193,6 +209,12 @@ export function SimpleEditorPanel({
               key={option.id}
               type="button"
               className="rounded-lg border p-2"
+              aria-label={`${paletteLabel(option.id, locale)}: ${option.colors.join(', ')}`}
+              aria-pressed={
+                document.canvas.background === option.colors[0] &&
+                JSON.stringify(document.palette) ===
+                  JSON.stringify(option.colors.slice(1))
+              }
               onClick={() =>
                 onApplyPalette(option.colors[0], option.colors.slice(1))
               }
@@ -205,6 +227,14 @@ export function SimpleEditorPanel({
                     style={{ background: color }}
                   />
                 ))}
+              </span>
+              <span className="mt-1 block text-xs">
+                {paletteLabel(option.id, locale)}
+                {document.palette.join(',') ===
+                  option.colors.slice(1).join(',') &&
+                document.canvas.background === option.colors[0]
+                  ? ' ✓'
+                  : ''}
               </span>
             </button>
           ))}
@@ -221,8 +251,15 @@ export function SimpleEditorPanel({
           value={purposeId ?? ''}
           onValueChange={(value) => value && onPurpose(value)}
         >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={en ? 'Choose a use' : '用途を選ぶ'} />
+          <SelectTrigger
+            className="w-full"
+            aria-label={en ? 'Use and size' : '用途とサイズ'}
+          >
+            <SelectValue>
+              {PURPOSE_PRESETS.find((item) => item.id === purposeId)?.[
+                en ? 'labelEn' : 'label'
+              ] ?? (en ? 'Choose a use' : '用途を選ぶ')}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {PURPOSE_PRESETS.map((item) => (
@@ -243,7 +280,11 @@ export function SimpleEditorPanel({
                 : 'ガイドだけを表示。書き出しには入りません。'}
             </span>
           </span>
-          <Switch checked={showSafeArea} onCheckedChange={onSafeArea} />
+          <Switch
+            aria-label={en ? 'Safe-area guide' : '安全域ガイド'}
+            checked={showSafeArea}
+            onCheckedChange={onSafeArea}
+          />
         </div>
       </section>
       <section className="space-y-3">
@@ -255,8 +296,13 @@ export function SimpleEditorPanel({
             onPatchCanvas({ repeatMode: value as RepeatMode, seamless: true })
           }
         >
-          <SelectTrigger className="w-full">
-            <SelectValue />
+          <SelectTrigger
+            className="w-full"
+            aria-label={en ? 'Repeat mode' : 'リピート方式'}
+          >
+            <SelectValue>
+              {repeatLabel(document.canvas.repeatMode ?? 'straight', locale)}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="straight">

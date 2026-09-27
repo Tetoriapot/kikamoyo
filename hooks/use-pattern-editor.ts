@@ -7,10 +7,18 @@ import {
   presetDocument,
 } from '@/data/presets';
 import type {
-  CanvasConfig, EditorDocument, EditorSnapshot, OmakaseGeneration, PatternConfig, PatternLayer,
+  CanvasConfig,
+  EditorDocument,
+  EditorSnapshot,
+  OmakaseGeneration,
+  PatternConfig,
+  PatternLayer,
 } from '@/lib/pattern-types';
 import {
-  cloneDocument, cloneSnapshot, normalizeSnapshot, parseEditorSnapshot,
+  cloneDocument,
+  cloneSnapshot,
+  normalizeSnapshot,
+  parseEditorSnapshot,
 } from '@/lib/pattern-types';
 
 interface HistoryState {
@@ -19,7 +27,9 @@ interface HistoryState {
   future: EditorSnapshot[];
 }
 
-type DocumentUpdater = EditorDocument | ((document: EditorDocument) => EditorDocument);
+type DocumentUpdater =
+  | EditorDocument
+  | ((document: EditorDocument) => EditorDocument);
 type RestoreStatus = 'initial' | 'session' | 'shared' | 'invalid-shared';
 
 interface ReplaceOptions {
@@ -39,7 +49,10 @@ const INITIAL_SNAPSHOT: EditorSnapshot = {
 
 function decodeState(value: string) {
   if (value.length > 250_000) throw new Error('Shared state is too large');
-  const normalized = value.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const normalized = value
+    .replaceAll('-', '+')
+    .replaceAll('_', '/')
+    .padEnd(Math.ceil(value.length / 4) * 4, '=');
   const binary = window.atob(normalized);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
@@ -48,14 +61,26 @@ function decodeState(value: string) {
 function removeInvalidStateFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete('state');
-  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  window.history.replaceState(
+    window.history.state,
+    '',
+    `${url.pathname}${url.search}${url.hash}`,
+  );
 }
 
 export function usePatternEditor() {
-  const [history, setHistory] = useState<HistoryState>({ past: [], present: cloneSnapshot(INITIAL_SNAPSHOT), future: [] });
+  const [history, setHistory] = useState<HistoryState>({
+    past: [],
+    present: cloneSnapshot(INITIAL_SNAPSHOT),
+    future: [],
+  });
   const [hydrated, setHydrated] = useState(false);
+  const [storageStatus, setStorageStatus] = useState<
+    'saving' | 'saved' | 'error'
+  >('saving');
   const [restoreStatus, setRestoreStatus] = useState<RestoreStatus>('initial');
   const lastCommitAt = useRef(0);
+  const autosaveBlocked = useRef(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -94,10 +119,15 @@ export function usePatternEditor() {
               }
               if (status !== 'invalid-shared') status = 'session';
             }
-            if (!restored) window.localStorage.removeItem('lastSession');
+            if (!restored) {
+              autosaveBlocked.current = true;
+              setStorageStatus('error');
+            }
           }
         } catch {
-          // Storage may be unavailable or contain malformed JSON. The initial preset remains safe.
+          // Keep unreadable sessions intact instead of overwriting with the initial preset.
+          autosaveBlocked.current = true;
+          setStorageStatus('error');
         }
       }
 
@@ -112,59 +142,98 @@ export function usePatternEditor() {
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || autosaveBlocked.current) return;
     const timer = window.setTimeout(() => {
-      try { window.localStorage.setItem('lastSession', JSON.stringify(history.present)); } catch { /* Device storage can be unavailable. */ }
+      try {
+        window.localStorage.setItem(
+          'lastSession',
+          JSON.stringify(history.present),
+        );
+        setStorageStatus('saved');
+      } catch {
+        setStorageStatus('error');
+      }
     }, 220);
     return () => window.clearTimeout(timer);
   }, [history.present, hydrated]);
 
   const commit = useCallback((updater: DocumentUpdater) => {
     const committedAt = Date.now();
-    const coalesce = lastCommitAt.current > 0 && committedAt - lastCommitAt.current <= 220;
+    const coalesce =
+      lastCommitAt.current > 0 && committedAt - lastCommitAt.current <= 220;
     lastCommitAt.current = committedAt;
     setHistory((current) => {
       const draft = cloneDocument(current.present.document);
-      const nextDocument = typeof updater === 'function' ? updater(draft) : cloneDocument(updater);
-      if (JSON.stringify(nextDocument) === JSON.stringify(current.present.document)) return current;
-      const next = normalizeSnapshot({ ...current.present, document: nextDocument });
-      const past = coalesce ? current.past : [...current.past, current.present].slice(-20);
+      const nextDocument =
+        typeof updater === 'function' ? updater(draft) : cloneDocument(updater);
+      if (
+        JSON.stringify(nextDocument) ===
+        JSON.stringify(current.present.document)
+      )
+        return current;
+      const next = normalizeSnapshot({
+        ...current.present,
+        document: nextDocument,
+      });
+      const past = coalesce
+        ? current.past
+        : [...current.past, current.present].slice(-20);
       return { past, present: next, future: [] };
     });
   }, []);
 
-  const replace = useCallback((document: EditorDocument, options: ReplaceOptions = {}) => {
-    lastCommitAt.current = 0;
-    setHistory((current) => {
-      const next = normalizeSnapshot({
-        sessionVersion: 1,
-        document: cloneDocument(document),
-        presetId: options.presetId ?? null,
-        presetName: options.presetName ?? 'カスタム模様',
-        activeLayerId: options.activeLayerId ?? document.layers[0]?.id ?? null,
-        ...(options.generation ? { generation: options.generation } : {}),
+  const replace = useCallback(
+    (document: EditorDocument, options: ReplaceOptions = {}) => {
+      lastCommitAt.current = 0;
+      setHistory((current) => {
+        const next = normalizeSnapshot({
+          sessionVersion: 1,
+          document: cloneDocument(document),
+          presetId: options.presetId ?? null,
+          presetName: options.presetName ?? 'カスタム模様',
+          activeLayerId:
+            options.activeLayerId ?? document.layers[0]?.id ?? null,
+          ...(options.generation ? { generation: options.generation } : {}),
+        });
+        return {
+          past: [...current.past, current.present].slice(-20),
+          present: next,
+          future: [],
+        };
       });
-      return { past: [...current.past, current.present].slice(-20), present: next, future: [] };
-    });
-  }, []);
+    },
+    [],
+  );
 
   const setIdentity = useCallback((options: ReplaceOptions) => {
     setHistory((current) => ({
       ...current,
       present: normalizeSnapshot({
         ...current.present,
-        presetId: options.presetId === undefined ? current.present.presetId : options.presetId,
+        presetId:
+          options.presetId === undefined
+            ? current.present.presetId
+            : options.presetId,
         presetName: options.presetName ?? current.present.presetName,
-        activeLayerId: options.activeLayerId === undefined ? current.present.activeLayerId : options.activeLayerId,
-        ...(options.generation === undefined ? {} : { generation: options.generation }),
+        activeLayerId:
+          options.activeLayerId === undefined
+            ? current.present.activeLayerId
+            : options.activeLayerId,
+        ...(options.generation === undefined
+          ? {}
+          : { generation: options.generation }),
       }),
     }));
   }, []);
 
   const setActiveLayerId = useCallback((activeLayerId: string) => {
-    setHistory((current) => current.present.document.layers.some((layer) => layer.id === activeLayerId)
-      ? { ...current, present: { ...current.present, activeLayerId } }
-      : current);
+    setHistory((current) =>
+      current.present.document.layers.some(
+        (layer) => layer.id === activeLayerId,
+      )
+        ? { ...current, present: { ...current.present, activeLayerId } }
+        : current,
+    );
   }, []);
 
   const undo = useCallback(() => {
@@ -172,7 +241,11 @@ export function usePatternEditor() {
     setHistory((current) => {
       const previous = current.past.at(-1);
       if (!previous) return current;
-      return { past: current.past.slice(0, -1), present: previous, future: [current.present, ...current.future].slice(0, 20) };
+      return {
+        past: current.past.slice(0, -1),
+        present: previous,
+        future: [current.present, ...current.future].slice(0, 20),
+      };
     });
   }, []);
 
@@ -181,7 +254,11 @@ export function usePatternEditor() {
     setHistory((current) => {
       const next = current.future[0];
       if (!next) return current;
-      return { past: [...current.past, current.present].slice(-20), present: next, future: current.future.slice(1) };
+      return {
+        past: [...current.past, current.present].slice(-20),
+        present: next,
+        future: current.future.slice(1),
+      };
     });
   }, []);
 
@@ -191,8 +268,12 @@ export function usePatternEditor() {
       if (target?.matches('input, textarea, [contenteditable="true"]')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        if (event.shiftKey) redo(); else undo();
-      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+        if (event.shiftKey) redo();
+        else undo();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === 'y'
+      ) {
         event.preventDefault();
         redo();
       }
@@ -201,37 +282,106 @@ export function usePatternEditor() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [redo, undo]);
 
-  const patchCanvas = useCallback((patch: Partial<CanvasConfig>) => commit((document) => ({ ...document, canvas: { ...document.canvas, ...patch } })), [commit]);
-  const patchLayer = useCallback((id: string, patch: Partial<PatternLayer>) => commit((document) => ({ ...document, layers: document.layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer) })), [commit]);
-  const patchLayerConfig = useCallback((id: string, patch: Partial<PatternConfig>) => commit((document) => ({ ...document, layers: document.layers.map((layer) => layer.id === id ? { ...layer, config: { ...layer.config, ...patch } } : layer) })), [commit]);
+  const patchCanvas = useCallback(
+    (patch: Partial<CanvasConfig>) =>
+      commit((document) => {
+        const canvas = { ...document.canvas, ...patch };
+        if (patch.textSpace) canvas.seamless = false;
+        if (canvas.seamless) delete canvas.textSpace;
+        return { ...document, canvas };
+      }),
+    [commit],
+  );
+  const patchLayer = useCallback(
+    (id: string, patch: Partial<PatternLayer>) =>
+      commit((document) => ({
+        ...document,
+        layers: document.layers.map((layer) =>
+          layer.id === id ? { ...layer, ...patch } : layer,
+        ),
+      })),
+    [commit],
+  );
+  const patchLayerConfig = useCallback(
+    (id: string, patch: Partial<PatternConfig>) =>
+      commit((document) => ({
+        ...document,
+        layers: document.layers.map((layer) =>
+          layer.id === id
+            ? { ...layer, config: { ...layer.config, ...patch } }
+            : layer,
+        ),
+      })),
+    [commit],
+  );
 
-  const addLayer = useCallback((source?: PatternLayer) => commit((document) => {
-    if (document.layers.length >= 5) return document;
-    const base = source ? cloneDocument({ ...document, layers: [source] }).layers[0] : document.layers[0];
-    const copy: PatternLayer = { ...base, config: { ...base.config }, id: `layer-${Date.now()}-${document.layers.length}`, name: `レイヤー ${document.layers.length + 1}`, offsetX: base.offsetX + 10, offsetY: base.offsetY + 10 };
-    return { ...document, layers: [...document.layers, copy] };
-  }), [commit]);
+  const addLayer = useCallback(
+    (source?: PatternLayer) =>
+      commit((document) => {
+        if (document.layers.length >= 5) return document;
+        const base = source
+          ? cloneDocument({ ...document, layers: [source] }).layers[0]
+          : document.layers[0];
+        const copy: PatternLayer = {
+          ...base,
+          config: { ...base.config },
+          id: `layer-${Date.now()}-${document.layers.length}`,
+          name: `レイヤー ${document.layers.length + 1}`,
+          offsetX: base.offsetX + 10,
+          offsetY: base.offsetY + 10,
+        };
+        return { ...document, layers: [...document.layers, copy] };
+      }),
+    [commit],
+  );
 
-  const removeLayer = useCallback((id: string) => commit((document) => document.layers.length <= 1 ? document : ({ ...document, layers: document.layers.filter((layer) => layer.id !== id) })), [commit]);
-  const duplicateLayer = useCallback((id: string) => commit((document) => {
-    if (document.layers.length >= 5) return document;
-    const index = document.layers.findIndex((layer) => layer.id === id);
-    if (index < 0) return document;
-    const source = document.layers[index];
-    const copy = { ...source, config: { ...source.config }, id: `layer-${Date.now()}-copy`, name: `${source.name} コピー`, offsetX: source.offsetX + 8, offsetY: source.offsetY + 8 };
-    const layers = [...document.layers];
-    layers.splice(index + 1, 0, copy);
-    return { ...document, layers };
-  }), [commit]);
+  const removeLayer = useCallback(
+    (id: string) =>
+      commit((document) =>
+        document.layers.length <= 1
+          ? document
+          : {
+              ...document,
+              layers: document.layers.filter((layer) => layer.id !== id),
+            },
+      ),
+    [commit],
+  );
+  const duplicateLayer = useCallback(
+    (id: string) =>
+      commit((document) => {
+        if (document.layers.length >= 5) return document;
+        const index = document.layers.findIndex((layer) => layer.id === id);
+        if (index < 0) return document;
+        const source = document.layers[index];
+        const copy = {
+          ...source,
+          config: { ...source.config },
+          id: `layer-${Date.now()}-copy`,
+          name: `${source.name} コピー`,
+          offsetX: source.offsetX + 8,
+          offsetY: source.offsetY + 8,
+        };
+        const layers = [...document.layers];
+        layers.splice(index + 1, 0, copy);
+        return { ...document, layers };
+      }),
+    [commit],
+  );
 
-  const moveLayer = useCallback((id: string, direction: -1 | 1) => commit((document) => {
-    const index = document.layers.findIndex((layer) => layer.id === id);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= document.layers.length) return document;
-    const layers = [...document.layers];
-    [layers[index], layers[nextIndex]] = [layers[nextIndex], layers[index]];
-    return { ...document, layers };
-  }), [commit]);
+  const moveLayer = useCallback(
+    (id: string, direction: -1 | 1) =>
+      commit((document) => {
+        const index = document.layers.findIndex((layer) => layer.id === id);
+        const nextIndex = index + direction;
+        if (index < 0 || nextIndex < 0 || nextIndex >= document.layers.length)
+          return document;
+        const layers = [...document.layers];
+        [layers[index], layers[nextIndex]] = [layers[nextIndex], layers[index]];
+        return { ...document, layers };
+      }),
+    [commit],
+  );
 
   return {
     snapshot: history.present,
@@ -241,6 +391,7 @@ export function usePatternEditor() {
     activeLayerId: history.present.activeLayerId,
     generation: history.present.generation,
     hydrated,
+    storageStatus,
     restoreStatus,
     commit,
     replace,

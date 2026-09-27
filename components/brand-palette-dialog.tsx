@@ -14,14 +14,8 @@ import {
 import { Input } from '@/components/ui/input';
 import type { EditorDocument } from '@/lib/pattern-types';
 import type { Locale } from '@/lib/i18n';
-
-interface BrandPalette {
-  id: string;
-  name: string;
-  background: string;
-  colors: string[];
-}
-const KEY = 'kikamoyo.brand-palettes.v1';
+import type { BrandPalette } from '@/lib/brand-palettes';
+import { readBrandPalettes, writeBrandPalettes } from '@/lib/project-codec';
 
 export function BrandPaletteDialog({
   document,
@@ -35,34 +29,41 @@ export function BrandPaletteDialog({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [items, setItems] = useState<BrandPalette[]>([]);
+  const [message, setMessage] = useState('');
+  const [ready, setReady] = useState(false);
   const en = locale === 'en';
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => {
       try {
-        const value: unknown = JSON.parse(localStorage.getItem(KEY) ?? '[]');
-        if (Array.isArray(value))
-          setItems(
-            value
-              .filter(
-                (item): item is BrandPalette =>
-                  Boolean(item) &&
-                  typeof item === 'object' &&
-                  typeof (item as BrandPalette).id === 'string' &&
-                  typeof (item as BrandPalette).name === 'string' &&
-                  Array.isArray((item as BrandPalette).colors),
-              )
-              .slice(0, 20),
-          );
+        setItems(readBrandPalettes());
+        setReady(true);
+        setMessage('');
       } catch {
-        setItems([]);
+        setReady(false);
+        setMessage(
+          en
+            ? 'Cannot read saved colors. Existing data is kept.'
+            : '保存色を読み込めません。既存データは保持しています。',
+        );
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [open]);
+  }, [open, en]);
   function persist(next: BrandPalette[]) {
-    setItems(next);
-    localStorage.setItem(KEY, JSON.stringify(next));
+    try {
+      writeBrandPalettes(next);
+      setItems(next);
+      setMessage(en ? 'Saved.' : '保存しました。');
+      return true;
+    } catch {
+      setMessage(
+        en
+          ? 'Save failed. Check storage and the 20-palette limit.'
+          : '保存できません。容量と20配色の上限を確認してください。',
+      );
+      return false;
+    }
   }
   function save() {
     const item = {
@@ -71,8 +72,7 @@ export function BrandPaletteDialog({
       background: document.canvas.background,
       colors: [...document.palette],
     };
-    persist([item, ...items].slice(0, 20));
-    setName('');
+    if (persist([item, ...items])) setName('');
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -80,7 +80,7 @@ export function BrandPaletteDialog({
         <Palette />
         {en ? 'Brand colors' : 'ブランド色'}
       </DialogTrigger>
-      <DialogContent className="max-w-lg">
+      <DialogContent closeLabel={en ? 'Close' : '閉じる'} className="max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {en ? 'Brand palettes' : 'ブランドパレット'}
@@ -93,16 +93,24 @@ export function BrandPaletteDialog({
         </DialogHeader>
         <div className="flex gap-2">
           <Input
+            aria-label={en ? 'Palette name' : 'パレット名'}
             value={name}
             maxLength={80}
             onChange={(event) => setName(event.target.value)}
             placeholder={en ? 'Palette name' : 'パレット名'}
           />
-          <Button onClick={save}>
+          <Button onClick={save} disabled={!ready || items.length >= 20}>
             <Plus />
             {en ? 'Save current' : '現在色を保存'}
           </Button>
         </div>
+        <p className="text-xs">
+          {items.length}/20{' '}
+          {en
+            ? 'palettes · Included in the Projects library backup.'
+            : '配色 · プロジェクトのライブラリバックアップに含まれます。'}
+        </p>
+        <output className="block text-sm">{message}</output>
         <div className="max-h-72 space-y-2 overflow-y-auto">
           {items.map((item) => (
             <div
@@ -129,9 +137,16 @@ export function BrandPaletteDialog({
                 size="icon-sm"
                 variant="ghost"
                 aria-label={en ? `Delete ${item.name}` : `${item.name}を削除`}
-                onClick={() =>
-                  persist(items.filter((value) => value.id !== item.id))
-                }
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      en
+                        ? `Delete palette “${item.name}”? Export a library backup first if you need it.`
+                        : `「${item.name}」を削除しますか？残したい場合は先にライブラリをバックアップしてください。`,
+                    )
+                  )
+                    persist(items.filter((value) => value.id !== item.id));
+                }}
               >
                 <Trash2 />
               </Button>

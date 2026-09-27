@@ -42,7 +42,10 @@ export function DisplaySettingsDialog({
       >
         <Settings2 />
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent
+        closeLabel={en ? 'Close' : '閉じる'}
+        className="max-h-[92dvh] overflow-y-auto max-w-md"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Languages className="size-5" />
@@ -111,6 +114,7 @@ export function DisplaySettingsDialog({
               </span>
             </span>
             <Switch
+              aria-label={en ? 'Larger text' : '大きめ文字'}
               checked={value.textSize === 'large'}
               onCheckedChange={(large) =>
                 onChange({ textSize: large ? 'large' : 'normal' })
@@ -129,6 +133,7 @@ export function DisplaySettingsDialog({
               </span>
             </span>
             <Switch
+              aria-label={en ? 'Dark theme' : 'ダークテーマ'}
               checked={value.darkMode}
               onCheckedChange={(darkMode) => onChange({ darkMode })}
             />
@@ -145,6 +150,7 @@ export function DisplaySettingsDialog({
               </span>
             </span>
             <Switch
+              aria-label={en ? 'Safe-area guide' : '安全域ガイド'}
               checked={value.showSafeArea}
               onCheckedChange={(showSafeArea) => onChange({ showSafeArea })}
             />

@@ -14,6 +14,7 @@ import {
 } from '@/lib/procedural-layout';
 import { getRepeatPlan } from '@/lib/repeat-layout';
 import { hashUnit } from '@/lib/seed';
+import { textSpaceStops } from '@/lib/composition';
 
 function polygonPoints(sides: number, radius: number, start = -90) {
   return Array.from({ length: sides }, (_, index) => {
@@ -431,6 +432,37 @@ export const PatternCanvas = memo(function PatternCanvas({
         <desc id={`desc-${reactId}`}>{description}</desc>
       )}
       <defs>
+        {document.canvas.textSpace && !seamless && (
+          <>
+            <linearGradient
+              id={`space-gradient-${reactId}`}
+              gradientUnits="userSpaceOnUse"
+              x1={0}
+              x2={document.canvas.width}
+              y1={0}
+              y2={0}
+            >
+              {textSpaceStops(document.canvas.textSpace).map((stop, index) => (
+                <stop key={index} offset={stop.offset} stopColor={stop.color} />
+              ))}
+            </linearGradient>
+            <mask
+              id={`text-space-${reactId}`}
+              maskUnits="userSpaceOnUse"
+              x={0}
+              y={0}
+              width={document.canvas.width}
+              height={document.canvas.height}
+              style={{ maskType: 'luminance' }}
+            >
+              <rect
+                width={document.canvas.width}
+                height={document.canvas.height}
+                fill={`url(#space-gradient-${reactId})`}
+              />
+            </mask>
+          </>
+        )}
         {visibleLayers.map((layer) => {
           const patternId = `pattern-${reactId}-${layer.id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
           const surfaceTransform = `translate(${layer.offsetX} ${layer.offsetY})`;
@@ -683,26 +715,34 @@ export const PatternCanvas = memo(function PatternCanvas({
           fill={document.canvas.background}
         />
       )}
-      <g transform={transform}>
-        {visibleLayers.map((layer) => {
-          const safeLayerId = layer.id.replace(/[^a-zA-Z0-9_-]/g, '');
-          const patternId =
-            seamless && repeatMode !== 'straight'
-              ? `layout-${reactId}-${safeLayerId}`
-              : `pattern-${reactId}-${safeLayerId}`;
-          return (
-            <rect
-              key={layer.id}
-              x={fillBounds.x}
-              y={fillBounds.y}
-              width={fillBounds.width}
-              height={fillBounds.height}
-              fill={`url(#${patternId})`}
-              opacity={layer.opacity}
-              style={{ mixBlendMode: layer.blendMode }}
-            />
-          );
-        })}
+      <g
+        mask={
+          document.canvas.textSpace && !seamless
+            ? `url(#text-space-${reactId})`
+            : undefined
+        }
+      >
+        <g transform={transform}>
+          {visibleLayers.map((layer) => {
+            const safeLayerId = layer.id.replace(/[^a-zA-Z0-9_-]/g, '');
+            const patternId =
+              seamless && repeatMode !== 'straight'
+                ? `layout-${reactId}-${safeLayerId}`
+                : `pattern-${reactId}-${safeLayerId}`;
+            return (
+              <rect
+                key={layer.id}
+                x={fillBounds.x}
+                y={fillBounds.y}
+                width={fillBounds.width}
+                height={fillBounds.height}
+                fill={`url(#${patternId})`}
+                opacity={layer.opacity}
+                style={{ mixBlendMode: layer.blendMode }}
+              />
+            );
+          })}
+        </g>
       </g>
       {previewTiling && (
         <g

@@ -150,6 +150,8 @@ export interface CanvasConfig {
   flipY: boolean;
   /** Optional so every legacy preset and shared URL remains byte-for-byte compatible. */
   repeatMode?: RepeatMode;
+  /** Composition-level negative space, without adding a pattern layer. */
+  textSpace?: { position: 'left' | 'center' | 'right'; width: number };
 }
 
 export interface EditorDocument {
@@ -332,6 +334,16 @@ export function isEditorDocument(value: unknown): value is EditorDocument {
   if (!isRecord(value.canvas)) return false;
   const canvas = value.canvas;
   if (
+    canvas.textSpace !== undefined &&
+    (!isRecord(canvas.textSpace) ||
+      !['left', 'center', 'right'].includes(
+        canvas.textSpace.position as string,
+      ) ||
+      !isFiniteInRange(canvas.textSpace.width, 0.2, 0.7) ||
+      canvas.seamless === true)
+  )
+    return false;
+  if (
     !isIntegerInRange(canvas.width, 64, 16_384) ||
     !isIntegerInRange(canvas.height, 64, 16_384) ||
     typeof canvas.background !== 'string' ||
@@ -392,6 +404,7 @@ export function isEditorSnapshot(value: unknown): value is EditorSnapshot {
 
 export function normalizeSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
   const next = cloneSnapshot(snapshot);
+  if (next.document.canvas.seamless) delete next.document.canvas.textSpace;
   if (!next.document.layers.some((layer) => layer.id === next.activeLayerId)) {
     next.activeLayerId = next.document.layers[0]?.id ?? null;
   }

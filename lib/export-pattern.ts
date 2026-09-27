@@ -236,18 +236,35 @@ export async function downloadLoopWebm(options: {
   name: string;
   duration?: number;
   fps?: number;
+  outputWidth?: number;
+  outputHeight?: number;
+  direction?: 'left' | 'right' | 'up' | 'down';
+  cycles?: number;
 }) {
   if (typeof MediaRecorder === 'undefined')
     throw new Error('このブラウザーはWebM書き出しに対応していません。');
-  const size = Math.min(768, Math.max(256, options.width));
-  const outputHeight = Math.max(
-    128,
-    Math.round((size * options.height) / options.width),
-  );
+  if (options.width * options.height > 16_777_216)
+    throw new Error(
+      '基本タイルが大きすぎます。タイルサイズを下げてください。 / Reduce the tile size before exporting video.',
+    );
+  const size = options.outputWidth ?? options.width;
+  const outputHeight = options.outputHeight ?? options.height;
+  if (
+    !Number.isInteger(size) ||
+    !Number.isInteger(outputHeight) ||
+    size < 64 ||
+    outputHeight < 64 ||
+    size > 1920 ||
+    outputHeight > 1920 ||
+    size * outputHeight > 2_073_600
+  )
+    throw new Error(
+      '動画は最大1920px・207万画素です。 / Video size exceeds the supported limit.',
+    );
   const source = serializedSvg(
     options.elementId,
-    size,
-    outputHeight,
+    options.width,
+    options.height,
     false,
     options.background,
   );
@@ -262,7 +279,27 @@ export async function downloadLoopWebm(options: {
   }
   const fps = options.fps ?? 24;
   const duration = options.duration ?? 2;
-  const stream = canvas.captureStream(fps);
+  const cycles = options.cycles ?? 1;
+  if (
+    !Number.isFinite(duration) ||
+    duration < 1 ||
+    duration > 10 ||
+    !Number.isInteger(cycles) ||
+    cycles < 1 ||
+    cycles > 4
+  ) {
+    bitmap.close();
+    throw new Error('Invalid loop duration or speed');
+  }
+  let stream: MediaStream;
+  try {
+    stream = canvas.captureStream(fps);
+  } catch {
+    bitmap.close();
+    throw new Error(
+      '動画用ストリームを作成できません。 / Canvas recording is not supported.',
+    );
+  }
   const mime = [
     'video/webm;codecs=vp9',
     'video/webm;codecs=vp8',
@@ -273,33 +310,76 @@ export async function downloadLoopWebm(options: {
     stream.getTracks().forEach((track) => track.stop());
     throw new Error('WebMコーデックを利用できません。');
   }
-  const recorder = new MediaRecorder(stream, {
-    mimeType: mime,
-    videoBitsPerSecond: 4_000_000,
-  });
+  let recorder: MediaRecorder;
+  try {
+    recorder = new MediaRecorder(stream, {
+      mimeType: mime,
+      videoBitsPerSecond: 4_000_000,
+    });
+  } catch {
+    bitmap.close();
+    stream.getTracks().forEach((track) => track.stop());
+    throw new Error(
+      '動画エンコーダーを開始できません。 / Cannot initialize the video encoder.',
+    );
+  }
   const chunks: Blob[] = [];
   recorder.ondataavailable = (event) => {
     if (event.data.size) chunks.push(event.data);
   };
-  const stopped = new Promise<void>((resolve, reject) => {
+  let recordingError: Error | null = null;
+  const stopped = new Promise<void>((resolve) => {
     recorder.onstop = () => resolve();
-    recorder.onerror = () => reject(new Error('WebMの作成に失敗しました。'));
+    recorder.onerror = () => {
+      recordingError = new Error(
+        'WebMの作成に失敗しました。 / WebM recording failed.',
+      );
+      resolve();
+    };
   });
-  recorder.start();
-  const frames = Math.round(duration * fps);
-  for (let frame = 0; frame < frames; frame += 1) {
-    const phase = frame / frames;
-    const offsetX = -Math.round(size * phase);
-    context.fillStyle = options.background;
-    context.fillRect(0, 0, size, outputHeight);
-    for (let x = offsetX - size; x < size; x += size)
-      context.drawImage(bitmap, x, 0, size, outputHeight);
-    await new Promise((resolve) => window.setTimeout(resolve, 1000 / fps));
+  try {
+    const frames = Math.round(duration * fps);
+    const draw = (phase: number) => {
+      const direction = options.direction ?? 'left';
+      const horizontal = direction === 'left' || direction === 'right';
+      const sign = direction === 'right' || direction === 'down' ? 1 : -1;
+      const shift = (phase * cycles) % 1;
+      const offsetX = horizontal ? sign * options.width * shift : 0;
+      const offsetY = horizontal ? 0 : sign * options.height * shift;
+      context.fillStyle = options.background;
+      context.fillRect(0, 0, size, outputHeight);
+      for (
+        let y = offsetY - options.height;
+        y < outputHeight;
+        y += options.height
+      )
+        for (let x = offsetX - options.width; x < size; x += options.width)
+          context.drawImage(bitmap, x, y, options.width, options.height);
+    };
+    draw(0);
+    recorder.start();
+    const startedAt = performance.now();
+    for (let frame = 0; frame < frames; frame += 1) {
+      if (recordingError) throw recordingError;
+      draw(frame / frames);
+      await new Promise((resolve) =>
+        window.setTimeout(
+          resolve,
+          Math.max(
+            0,
+            startedAt + ((frame + 1) * 1000) / fps - performance.now(),
+          ),
+        ),
+      );
+    }
+    recorder.stop();
+    await stopped;
+    if (recordingError) throw recordingError;
+  } finally {
+    if (recorder.state !== 'inactive') recorder.stop();
+    bitmap.close();
+    stream.getTracks().forEach((track) => track.stop());
   }
-  recorder.stop();
-  await stopped;
-  bitmap.close();
-  stream.getTracks().forEach((track) => track.stop());
   triggerDownload(
     new Blob(chunks, { type: mime }),
     `${safeName(options.name)}-loop.webm`,
